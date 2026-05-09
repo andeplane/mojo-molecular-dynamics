@@ -17,16 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Magic
-        run: |
-          curl -ssL https://magic.modular.com | bash
-          echo "$HOME/.magic/bin" >> $GITHUB_PATH
-
-      - name: Install Mojo
-        run: magic install
+      - name: Set up Mojo (via pixi)
+        uses: prefix-dev/setup-pixi@v0.8.0
+        with:
+          manifest-path: mojoproject.toml
 
       - name: Run unit and integration tests
-        run: magic run mojo test test/
+        run: pixi run test
 
       - name: Smoke-test Argon demo
-        run: magic run mojo run main.mojo examples/argon.json
+        run: pixi run run-argon
