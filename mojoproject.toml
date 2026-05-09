@@ -6,7 +6,7 @@ channels = ["conda-forge", "https://conda.modular.com/max"]
 platforms = ["linux-64", "osx-arm64"]
 
 [tasks]
-test      = "mojo run test/test_atom.mojo && mojo run test/test_ghost.mojo && mojo run test/test_neighbor.mojo && mojo run test/test_lj.mojo && mojo run test/test_vashishta.mojo && mojo run test/test_integrator.mojo && mojo run test/test_integration.mojo"
+test      = "mojo run -I . test/test_atom.mojo && mojo run -I . test/test_ghost.mojo && mojo run -I . test/test_neighbor.mojo && mojo run -I . test/test_lj.mojo && mojo run -I . test/test_vashishta.mojo && mojo run -I . test/test_integrator.mojo && mojo run -I . test/test_integration.mojo"
 run-argon = "mojo run main.mojo examples/argon.json"
 run-sio2  = "mojo run main.mojo examples/sio2.json"
 
