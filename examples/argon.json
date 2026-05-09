@@ -1,0 +1,28 @@
+{
+  "box": [16.215, 16.215, 16.215],
+  "atom_types": [
+    {"name": "Ar", "mass": 39.948}
+  ],
+  "lattice": {
+    "type": "fcc",
+    "a": 5.405,
+    "nx": 3, "ny": 3, "nz": 3,
+    "atom_type": "Ar"
+  },
+  "velocities": {
+    "type": "maxwell_boltzmann",
+    "temperature": 0.0081,
+    "seed": 42
+  },
+  "pair_style": "lj",
+  "lj_pairs": [
+    {"types": ["Ar", "Ar"], "epsilon": 0.01040, "sigma": 3.4, "cutoff": 8.5}
+  ],
+  "run": {
+    "timestep": 0.002,
+    "nsteps": 1000,
+    "skin": 0.3,
+    "rebuild_every": 10,
+    "print_every": 100
+  }
+}
