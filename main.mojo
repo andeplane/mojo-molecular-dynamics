@@ -106,14 +106,31 @@ fn demo_sio2():
 
 
 # ---------------------------------------------------------------------------
-# Entry point: `mojo run main.mojo [path/to/config.json]`
+# Entry point
+#   mojo run main.mojo -in <config.json>
+#   mojo run main.mojo --demo lj
+#   mojo run main.mojo --demo vashishta
+#   mojo build main.mojo -o mojo-md  →  ./mojo-md -in config.json
 # ---------------------------------------------------------------------------
 
 fn main() raises:
     var args = argv()
-    if len(args) > 1:
-        run_from_file(args[1])
-    else:
-        demo_argon()
-        print()
-        demo_sio2()
+    var i = 1
+    while i < len(args):
+        if args[i] == "-in" and i + 1 < len(args):
+            run_from_file(args[i + 1])
+            return
+        elif args[i] == "--demo" and i + 1 < len(args):
+            if args[i + 1] == "lj":
+                demo_argon()
+            elif args[i + 1] == "vashishta":
+                demo_sio2()
+            else:
+                print("Unknown demo:", args[i + 1], "(choices: lj, vashishta)")
+            return
+        i += 1
+    print("Usage:")
+    print("  mojo run main.mojo -in <config.json>")
+    print("  mojo run main.mojo --demo lj")
+    print("  mojo run main.mojo --demo vashishta")
+    print("  mojo build main.mojo -o mojo-md  →  ./mojo-md -in config.json")
