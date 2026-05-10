@@ -1,7 +1,7 @@
-from math import sqrt
+from std.math import sqrt
 
 
-struct Atoms:
+struct Atoms(Movable):
     """
     Per-atom data in Structure-of-Arrays layout.
 
@@ -22,18 +22,6 @@ struct Atoms:
     var tag: List[Int]      # global atom ID [nmax]
 
     var box: List[Float64] # [lx, ly, lz] — orthogonal periodic box
-
-    fn __moveinit__(out self, deinit other: Atoms):
-        self.nlocal = other.nlocal
-        self.nghost = other.nghost
-        self.nmax = other.nmax
-        self.x = other.x^
-        self.v = other.v^
-        self.f = other.f^
-        self.mass = other.mass^
-        self.type_id = other.type_id^
-        self.tag = other.tag^
-        self.box = other.box^
 
     fn __init__(out self, nlocal: Int, lx: Float64, ly: Float64, lz: Float64):
         self.nlocal = nlocal

@@ -1,11 +1,11 @@
-from algorithm import parallelize
-from math import sqrt, exp
+from std.algorithm import parallelize
+from std.math import sqrt, exp
 from atom import Atoms
 from neighbor import NeighborList
 from pair_style import PairStyle
 
 # Coulomb constant in eV·Å / e²  (LAMMPS "metal" units)
-alias QQR2E: Float64 = 14.3996
+comptime QQR2E: Float64 = 14.3996
 
 
 struct VashishtaParam(ImplicitlyCopyable, Movable):
@@ -52,26 +52,6 @@ struct VashishtaParam(ImplicitlyCopyable, Movable):
     var cutsq2: Float64    # r₀²  (three-body gate)
     var dvrc: Float64      # -dV2/dr evaluated at rc
     var c0: Float64        # rc · dvrc − V2(rc)  (energy shift constant)
-
-    fn __copyinit__(out self, other: VashishtaParam):
-        self.bigh=other.bigh; self.eta=other.eta; self.zi=other.zi; self.zj=other.zj
-        self.lambda1=other.lambda1; self.bigd=other.bigd; self.lambda4=other.lambda4
-        self.bigw=other.bigw; self.cut=other.cut; self.bigb=other.bigb
-        self.gamma=other.gamma; self.r0=other.r0; self.bigc=other.bigc
-        self.costheta=other.costheta; self.heta=other.heta; self.zizj=other.zizj
-        self.lam1inv=other.lam1inv; self.mbigd=other.mbigd; self.lam4inv=other.lam4inv
-        self.big2b=other.big2b; self.big6w=other.big6w; self.cutsq=other.cutsq
-        self.cutsq2=other.cutsq2; self.dvrc=other.dvrc; self.c0=other.c0
-
-    fn __moveinit__(out self, deinit other: VashishtaParam):
-        self.bigh=other.bigh; self.eta=other.eta; self.zi=other.zi; self.zj=other.zj
-        self.lambda1=other.lambda1; self.bigd=other.bigd; self.lambda4=other.lambda4
-        self.bigw=other.bigw; self.cut=other.cut; self.bigb=other.bigb
-        self.gamma=other.gamma; self.r0=other.r0; self.bigc=other.bigc
-        self.costheta=other.costheta; self.heta=other.heta; self.zizj=other.zizj
-        self.lam1inv=other.lam1inv; self.mbigd=other.mbigd; self.lam4inv=other.lam4inv
-        self.big2b=other.big2b; self.big6w=other.big6w; self.cutsq=other.cutsq
-        self.cutsq2=other.cutsq2; self.dvrc=other.dvrc; self.c0=other.c0
 
     fn __init__(
         out self,
@@ -125,12 +105,6 @@ struct TwobodyResult(ImplicitlyCopyable, Movable):
     var fforce: Float64   # scalar: multiply by displacement to get force vector
     var energy: Float64
 
-    fn __copyinit__(out self, other: TwobodyResult):
-        self.fforce = other.fforce; self.energy = other.energy
-
-    fn __moveinit__(out self, deinit other: TwobodyResult):
-        self.fforce = other.fforce; self.energy = other.energy
-
     fn __init__(out self, fforce: Float64, energy: Float64):
         self.fforce = fforce
         self.energy = energy
@@ -168,16 +142,6 @@ struct ThreebodyResult(ImplicitlyCopyable, Movable):
     var fj_x: Float64; var fj_y: Float64; var fj_z: Float64
     var fk_x: Float64; var fk_y: Float64; var fk_z: Float64
     var energy: Float64
-
-    fn __copyinit__(out self, other: ThreebodyResult):
-        self.fj_x=other.fj_x; self.fj_y=other.fj_y; self.fj_z=other.fj_z
-        self.fk_x=other.fk_x; self.fk_y=other.fk_y; self.fk_z=other.fk_z
-        self.energy=other.energy
-
-    fn __moveinit__(out self, deinit other: ThreebodyResult):
-        self.fj_x=other.fj_x; self.fj_y=other.fj_y; self.fj_z=other.fj_z
-        self.fk_x=other.fk_x; self.fk_y=other.fk_y; self.fk_z=other.fk_z
-        self.energy=other.energy
 
     fn __init__(out self, fj_x: Float64, fj_y: Float64, fj_z: Float64,
                            fk_x: Float64, fk_y: Float64, fk_z: Float64,
@@ -264,12 +228,6 @@ struct PairVashishta(PairStyle):
     var params: List[VashishtaParam]
     var _cutoff: Float64
     var _r0_max: Float64
-
-    fn __moveinit__(out self, deinit other: PairVashishta):
-        self.n_types = other.n_types
-        self.params = other.params^
-        self._cutoff = other._cutoff
-        self._r0_max = other._r0_max
 
     fn __init__(out self, n_types: Int):
         self.n_types = n_types

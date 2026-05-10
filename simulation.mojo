@@ -5,7 +5,7 @@ from neighbor import NeighborList
 from pair_style import PairStyle
 
 
-struct Simulation[P: PairStyle, I: Integrator]:
+struct Simulation[P: PairStyle, I: Integrator](Movable):
     """
     Generic MD simulation driver.
 
@@ -25,8 +25,8 @@ struct Simulation[P: PairStyle, I: Integrator]:
     source real atoms (see GhostBuilder.reverse_comm).
     """
     var atoms: Atoms
-    var pair: P
-    var integrator: I
+    var pair: Self.P
+    var integrator: Self.I
     var nlist: NeighborList
     var ghosts: GhostBuilder
     var dt: Float64
@@ -34,22 +34,11 @@ struct Simulation[P: PairStyle, I: Integrator]:
     var rebuild_interval: Int
     var step: Int
 
-    fn __moveinit__(out self, deinit other: Simulation[P, I]):
-        self.atoms = other.atoms^
-        self.pair = other.pair^
-        self.integrator = other.integrator^
-        self.nlist = other.nlist^
-        self.ghosts = other.ghosts^
-        self.dt = other.dt
-        self.skin = other.skin
-        self.rebuild_interval = other.rebuild_interval
-        self.step = other.step
-
     fn __init__(
         out self,
         var atoms: Atoms,
-        var pair: P,
-        var integrator: I,
+        var pair: Self.P,
+        var integrator: Self.I,
         dt: Float64,
         skin: Float64 = 0.3,
         rebuild_interval: Int = 10,

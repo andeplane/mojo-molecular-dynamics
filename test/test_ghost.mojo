@@ -1,4 +1,4 @@
-from testing import assert_equal, assert_almost_equal, assert_true
+from std.testing import assert_equal, assert_almost_equal, assert_true
 from atom import Atoms
 from ghost import GhostBuilder
 

@@ -1,7 +1,7 @@
-from math import sqrt, log, cos, pi
+from std.math import sqrt, log, cos, pi
 from atom import Atoms
 
-alias TWO_PI: Float64 = 2.0 * pi
+comptime TWO_PI: Float64 = 2.0 * pi
 
 
 fn _lcg(mut state: Int) -> Float64:

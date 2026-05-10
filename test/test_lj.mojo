@@ -1,16 +1,16 @@
-from testing import assert_almost_equal, assert_true
+from std.testing import assert_almost_equal, assert_true
 from atom import Atoms
 from neighbor import NeighborList
 from pair_lj import PairLJ, LJParams
 
 
 # Argon reference parameters
-alias EPS: Float64 = 0.01040   # eV
-alias SIG: Float64 = 3.4       # Å
-alias RC:  Float64 = 8.5       # Å
+comptime EPS: Float64 = 0.01040   # eV
+comptime SIG: Float64 = 3.4       # Å
+comptime RC:  Float64 = 8.5       # Å
 
 # r_eq = 2^(1/6) * sigma — potential minimum
-alias R_EQ: Float64 = 3.8163709642518681  # Å = 2^(1/6) * 3.4 (exact to double precision)
+comptime R_EQ: Float64 = 3.8163709642518681  # Å = 2^(1/6) * 3.4 (exact to double precision)
 
 
 fn _make_2atom(r: Float64) -> Atoms:

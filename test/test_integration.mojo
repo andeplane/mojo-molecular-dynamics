@@ -1,5 +1,5 @@
-from math import sqrt
-from testing import assert_almost_equal, assert_true
+from std.math import sqrt
+from std.testing import assert_almost_equal, assert_true
 from atom import Atoms
 from ghost import GhostBuilder
 from integrator import VelocityVerlet
@@ -9,9 +9,9 @@ from simulation import Simulation
 
 
 # LJ Argon parameters
-alias EPS: Float64 = 0.01040
-alias SIG: Float64 = 3.4
-alias RC:  Float64 = 8.5
+comptime EPS: Float64 = 0.01040
+comptime SIG: Float64 = 3.4
+comptime RC:  Float64 = 8.5
 
 
 fn _ar_pair() -> PairLJ:

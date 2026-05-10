@@ -1,7 +1,7 @@
 from atom import Atoms, wrap_into_box
 
 
-struct GhostBuilder:
+struct GhostBuilder(Movable):
     """
     Generates ghost (image) atoms for periodic boundary conditions.
 
@@ -13,9 +13,6 @@ struct GhostBuilder:
     requires replacing rebuild_ghosts / reverse_comm with MPI variants.
     """
     var cutoff_with_skin: Float64
-
-    fn __moveinit__(out self, deinit other: GhostBuilder):
-        self.cutoff_with_skin = other.cutoff_with_skin
 
     fn __init__(out self, cutoff_with_skin: Float64):
         self.cutoff_with_skin = cutoff_with_skin

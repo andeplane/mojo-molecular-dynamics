@@ -1,4 +1,4 @@
-from testing import assert_almost_equal
+from std.testing import assert_almost_equal
 from atom import Atoms
 from integrator import VelocityVerlet
 

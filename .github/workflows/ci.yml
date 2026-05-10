@@ -17,13 +17,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Mojo (via pixi)
-        uses: prefix-dev/setup-pixi@v0.8.0
-        with:
-          manifest-path: mojoproject.toml
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Create venv and install Mojo
+        run: |
+          uv venv .venv
+          source .venv/bin/activate
+          uv pip install mojo
 
       - name: Run unit and integration tests
-        run: pixi run test
+        run: |
+          source .venv/bin/activate
+          for t in atom ghost neighbor lj vashishta integrator integration; do
+            mojo run -I . "test/test_${t}.mojo"
+          done
 
       - name: Smoke-test Argon demo
-        run: pixi run run-argon
+        run: |
+          source .venv/bin/activate
+          mojo run main.mojo examples/argon.json
+
+      - name: Smoke-test SiO2 demo
+        run: |
+          source .venv/bin/activate
+          mojo run main.mojo examples/sio2.json

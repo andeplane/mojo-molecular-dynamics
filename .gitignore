@@ -1,6 +1,5 @@
 __pycache__/
-.magic/
-magic.lock
+.venv/
 *.pyc
 *.mojopkg
 .DS_Store

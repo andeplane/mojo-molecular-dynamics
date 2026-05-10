@@ -2,7 +2,7 @@ from atom import Atoms
 from neighbor import NeighborList
 
 
-trait PairStyle(Movable):
+trait PairStyle(Movable, ImplicitlyDestructible):
     """
     Interface for pair (and many-body) potentials.
 

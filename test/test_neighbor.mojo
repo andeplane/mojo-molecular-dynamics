@@ -1,4 +1,4 @@
-from testing import assert_equal, assert_true, assert_almost_equal
+from std.testing import assert_equal, assert_true, assert_almost_equal
 from atom import Atoms
 from neighbor import NeighborList
 

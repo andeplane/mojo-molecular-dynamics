@@ -1,8 +1,8 @@
-from math import sqrt
+from std.math import sqrt
 from atom import Atoms
 
 
-struct NeighborList:
+struct NeighborList(Movable):
     """
     Full neighbor list stored as a flat CSR (compressed sparse row) array.
 
@@ -26,15 +26,6 @@ struct NeighborList:
     var short_neighbors: List[Int]
     var build_cutoff: Float64
     var build_short_cutoff: Float64
-
-    fn __moveinit__(out self, deinit other: NeighborList):
-        self.nlocal = other.nlocal
-        self.offsets = other.offsets^
-        self.neighbors = other.neighbors^
-        self.short_offsets = other.short_offsets^
-        self.short_neighbors = other.short_neighbors^
-        self.build_cutoff = other.build_cutoff
-        self.build_short_cutoff = other.build_short_cutoff
 
     fn __init__(out self, nlocal: Int):
         self.nlocal = nlocal

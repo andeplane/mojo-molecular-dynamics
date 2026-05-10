@@ -1,45 +1,11 @@
 from atom import Atoms
 from integrator import VelocityVerlet
-from sim_io import load_input
+from sim_io import run_from_file
 from pair_lj import PairLJ
 from pair_vashishta import PairVashishta, VashishtaParam
 from random_utils import init_velocities_mb
 from simulation import Simulation
-from sys import argv
-
-
-# ---------------------------------------------------------------------------
-# JSON-driven entry point
-# ---------------------------------------------------------------------------
-
-fn run_from_file(path: String) raises:
-    """Load and run a simulation defined by a JSON config file."""
-    var inp = load_input(path)
-    var intg = VelocityVerlet()
-    # Extract all fields before any branching so inp is fully consumed.
-    var dt               = inp.dt
-    var skin             = inp.skin
-    var rebuild_interval = inp.rebuild_interval
-    var nsteps           = inp.nsteps
-    var print_interval   = inp.print_interval
-    var pair_style       = inp.pair_style
-    var atoms            = inp.atoms^
-    var lj_pair          = inp.lj_pair^
-    var vash_pair        = inp.vashishta_pair^
-    if pair_style == "lj":
-        var sim = Simulation[PairLJ, VelocityVerlet](
-            atoms^, lj_pair^, intg^,
-            dt=dt, skin=skin, rebuild_interval=rebuild_interval,
-        )
-        sim.run(nsteps, print_interval)
-    elif pair_style == "vashishta":
-        var sim = Simulation[PairVashishta, VelocityVerlet](
-            atoms^, vash_pair^, intg^,
-            dt=dt, skin=skin, rebuild_interval=rebuild_interval,
-        )
-        sim.run(nsteps, print_interval)
-    else:
-        raise Error("Unknown pair_style: " + pair_style)
+from std.sys import argv
 
 
 # ---------------------------------------------------------------------------

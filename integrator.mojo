@@ -1,8 +1,8 @@
-from algorithm import parallelize
+from std.algorithm import parallelize
 from atom import Atoms
 
 
-trait Integrator(Movable):
+trait Integrator(Movable, ImplicitlyDestructible):
     """
     Interface for time integrators.
 
@@ -38,9 +38,6 @@ struct VelocityVerlet(Integrator):
 
     Energy conservation is second-order in dt.
     """
-
-    fn __moveinit__(out self, deinit other: VelocityVerlet):
-        pass
 
     fn __init__(out self):
         pass

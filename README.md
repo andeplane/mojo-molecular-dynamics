@@ -17,26 +17,30 @@ Implements the LAMMPS-style simulation loop with compile-time generic pair style
 
 ## Requirements
 
-Install [Magic](https://docs.modular.com/magic/) (Modular's package manager):
+Install Mojo into a Python virtual environment using [`uv`](https://github.com/astral-sh/uv):
 
 ```bash
-curl -ssL https://magic.modular.com | bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install mojo
 ```
 
 ## Quick start
 
 ```bash
+source .venv/bin/activate
+
 # Built-in demos: 108-atom Ar FCC (LJ) + 9-atom SiO₂ (Vashishta)
-magic run mojo run main.mojo
+mojo run main.mojo
 
 # Drive from a JSON config
-magic run mojo run main.mojo examples/argon.json
-magic run mojo run main.mojo examples/sio2.json
+mojo run main.mojo examples/argon.json
+mojo run main.mojo examples/sio2.json
 
-# Run the test suite
-magic run mojo test test/
-# or via the project task shortcut
-magic run test
+# Run the test suite (-I . so test files can import project-root modules)
+for t in atom ghost neighbor lj vashishta integrator integration; do
+  mojo run -I . "test/test_${t}.mojo"
+done
 ```
 
 ## Project layout
@@ -52,7 +56,7 @@ mojo-md/
 ├── integrator.mojo     — Integrator trait + VelocityVerlet
 ├── simulation.mojo     — Generic Simulation[P, I] loop driver
 ├── random_utils.mojo   — LCG RNG, Box-Muller, Maxwell-Boltzmann init
-├── io.mojo             — JSON config loader (via Python interop)
+├── sim_io.mojo         — JSON config loader (via Python interop)
 ├── main.mojo           — Entry point + built-in demos
 ├── examples/
 │   ├── argon.json      — 108-atom Ar FCC, LJ, 1 000 steps
