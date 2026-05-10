@@ -1,4 +1,3 @@
-from std.algorithm import parallelize
 from mojo_md.atom import Atoms, wrap_into_box
 
 
@@ -27,6 +26,7 @@ struct GhostBuilder(Movable):
         """
         wrap_into_box(atoms)
         atoms.nghost = 0
+        atoms.ghost_source = List[Int]()
 
         var lx = atoms.box[0]
         var ly = atoms.box[1]
@@ -66,36 +66,16 @@ struct GhostBuilder(Movable):
         atoms.f[3 * g + 2] = 0.0
         atoms.mass[g] = atoms.mass[source]
         atoms.type_id[g] = atoms.type_id[source]
-        atoms.tag[g] = atoms.tag[source]  # same global ID as source
+        atoms.tag[g] = atoms.tag[source]
+        atoms.ghost_source.append(source)
         atoms.nghost += 1
 
     fn reverse_comm(mut self, mut atoms: Atoms):
-        """
-        Accumulate forces from ghost atoms back onto their source real atoms.
-
-        Owner-computes: each local atom i scans all ghosts and sums those
-        whose tag matches i's tag. Each thread writes only to f[i] — no
-        atomics, no race conditions, parallel on CPU and GPU.
-
-        For PBC on a single process the source atom is identified by matching
-        tag (global ID). For typical ghost counts the O(N_local * N_ghost) scan
-        is cheap; a production MPI version replaces this with a reverse halo
-        exchange.
-        """
+        """Fold ghost forces back onto source real atoms. O(N_ghost)."""
         var nlocal = atoms.nlocal
-        var ntotal = atoms.n()
-
-        @parameter
-        fn fold_into(i: Int):
-            var i_tag = atoms.tag[i]
-            var fx: Float64 = 0.0;  var fy: Float64 = 0.0;  var fz: Float64 = 0.0
-            for g in range(nlocal, ntotal):
-                if atoms.tag[g] == i_tag:
-                    fx += atoms.f[3 * g]
-                    fy += atoms.f[3 * g + 1]
-                    fz += atoms.f[3 * g + 2]
-            atoms.f[3 * i]     += fx
-            atoms.f[3 * i + 1] += fy
-            atoms.f[3 * i + 2] += fz
-
-        parallelize[fold_into](nlocal)
+        for g in range(atoms.nghost):
+            var src = atoms.ghost_source[g]
+            var gi = nlocal + g
+            atoms.f[3 * src]     += atoms.f[3 * gi]
+            atoms.f[3 * src + 1] += atoms.f[3 * gi + 1]
+            atoms.f[3 * src + 2] += atoms.f[3 * gi + 2]

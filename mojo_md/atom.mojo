@@ -22,6 +22,7 @@ struct Atoms(Movable):
     var mass: List[Float64] # [nmax]
     var type_id: List[Int]  # atom type 0-indexed [nmax]
     var tag: List[Int]      # global atom ID [nmax]
+    var ghost_source: List[Int]  # ghost g → source local atom index [nghost]
 
     var box: List[Float64] # [lx, ly, lz] — orthogonal periodic box
 
@@ -36,6 +37,7 @@ struct Atoms(Movable):
         self.mass = List[Float64](capacity=self.nmax)
         self.type_id = List[Int](capacity=self.nmax)
         self.tag = List[Int](capacity=self.nmax)
+        self.ghost_source = List[Int]()
         self.box = List[Float64](capacity=3)
 
         for _ in range(3 * self.nmax):

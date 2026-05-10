@@ -16,7 +16,7 @@ trait PairStyle(Movable, ImplicitlyDestructible):
     pair style itself can be constructed without a DeviceContext.
     """
 
-    fn compute(mut self, mut atoms: Atoms, read nlist: NeighborList) -> Float64:
+    fn compute(mut self, mut atoms: Atoms, mut nlist: NeighborList) -> Float64:
         ...
 
     fn cutoff(self) -> Float64:

@@ -20,33 +20,33 @@ struct NeighborList(Movable):
     We store that separately as short_neighbors / short_offsets.
     """
     var nlocal: Int
-    var offsets: List[Int]       # len = nlocal + 1  (prefix sums)
-    var neighbors: List[Int]     # flat list of j indices
-    var short_offsets: List[Int] # same structure for j with r < r0_max
-    var short_neighbors: List[Int]
+    var offsets: List[Int32]       # len = nlocal + 1  (prefix sums)
+    var neighbors: List[Int32]     # flat list of j indices
+    var short_offsets: List[Int32] # same structure for j with r < r0_max
+    var short_neighbors: List[Int32]
     var build_cutoff: Float64
     var build_short_cutoff: Float64
 
     fn __init__(out self, nlocal: Int):
         self.nlocal = nlocal
-        self.offsets = List[Int](capacity=nlocal + 1)
-        self.neighbors = List[Int](capacity=nlocal * 50)
-        self.short_offsets = List[Int](capacity=nlocal + 1)
-        self.short_neighbors = List[Int](capacity=nlocal * 20)
+        self.offsets = List[Int32](capacity=nlocal + 1)
+        self.neighbors = List[Int32](capacity=nlocal * 50)
+        self.short_offsets = List[Int32](capacity=nlocal + 1)
+        self.short_neighbors = List[Int32](capacity=nlocal * 20)
         self.build_cutoff = 0.0
         self.build_short_cutoff = 0.0
 
     fn num_neighbors(self, i: Int) -> Int:
-        return self.offsets[i + 1] - self.offsets[i]
+        return Int(self.offsets[i + 1]) - Int(self.offsets[i])
 
     fn neighbor_start(self, i: Int) -> Int:
-        return self.offsets[i]
+        return Int(self.offsets[i])
 
     fn num_short(self, i: Int) -> Int:
-        return self.short_offsets[i + 1] - self.short_offsets[i]
+        return Int(self.short_offsets[i + 1]) - Int(self.short_offsets[i])
 
     fn short_start(self, i: Int) -> Int:
-        return self.short_offsets[i]
+        return Int(self.short_offsets[i])
 
     fn build(mut self, read atoms: Atoms, cutoff: Float64, short_cutoff: Float64 = 0.0):
         """
@@ -106,13 +106,13 @@ struct NeighborList(Movable):
             cell_cursor[cid] += 1
 
         # --- Build neighbor lists ---
-        self.offsets = List[Int](capacity=self.nlocal + 1)
-        self.neighbors = List[Int](capacity=n_total)
-        self.short_offsets = List[Int](capacity=self.nlocal + 1)
-        self.short_neighbors = List[Int](capacity=n_total)
+        self.offsets = List[Int32](capacity=self.nlocal + 1)
+        self.neighbors = List[Int32](capacity=n_total)
+        self.short_offsets = List[Int32](capacity=self.nlocal + 1)
+        self.short_neighbors = List[Int32](capacity=n_total)
 
-        self.offsets.append(0)
-        self.short_offsets.append(0)
+        self.offsets.append(Int32(0))
+        self.short_offsets.append(Int32(0))
         var cutsq = cutoff * cutoff
         var short_cutsq = short_cutoff * short_cutoff
 
@@ -147,12 +147,12 @@ struct NeighborList(Movable):
                             var ddz = zi - atoms.x[3 * j + 2]
                             var rsq = ddx * ddx + ddy * ddy + ddz * ddz
                             if rsq < cutsq:
-                                self.neighbors.append(j)
+                                self.neighbors.append(Int32(j))
                             if short_cutsq > 0.0 and rsq < short_cutsq:
-                                self.short_neighbors.append(j)
+                                self.short_neighbors.append(Int32(j))
 
-            self.offsets.append(len(self.neighbors))
-            self.short_offsets.append(len(self.short_neighbors))
+            self.offsets.append(Int32(len(self.neighbors)))
+            self.short_offsets.append(Int32(len(self.short_neighbors)))
 
 
 fn _clamp(x: Int, lo: Int, hi: Int) -> Int:

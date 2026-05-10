@@ -778,41 +778,29 @@ struct PairVashishta(PairStyle):
         return self._r0_max
 
     # ---- CPU dispatch ----
-    fn compute(mut self, mut atoms: Atoms, read nlist: NeighborList) -> Float64:
+    fn compute(mut self, mut atoms: Atoms, mut nlist: NeighborList) -> Float64:
         var nlocal = atoms.nlocal
 
-        # Pre-build the Int32 views of type_id and CSR offsets that the shared
-        # kernel body expects. One pass each — cheap.
-        var tid_buf = List[Int32]()
+        # type_id is List[Int] — convert once (nmax entries, small vs neighbor list).
+        var tid_buf = List[Int32](capacity=atoms.nmax)
         for i in range(atoms.nmax):
             tid_buf.append(Int32(atoms.type_id[i]))
-        var off_buf = List[Int32]()
-        for v in nlist.offsets:
-            off_buf.append(Int32(v))
-        var nb_buf = List[Int32]()
-        for v in nlist.neighbors:
-            nb_buf.append(Int32(v))
-        var soff_buf = List[Int32]()
-        for v in nlist.short_offsets:
-            soff_buf.append(Int32(v))
-        var snb_buf = List[Int32]()
-        for v in nlist.short_neighbors:
-            snb_buf.append(Int32(v))
 
+        # Neighbor lists are already List[Int32] — pass pointers directly, no copy.
         var pe_atom = List[Float64](capacity=nlocal)
         for _ in range(nlocal):
             pe_atom.append(0.0)
 
-        var x_ptr   = atoms.x.unsafe_ptr()
-        var f_ptr   = atoms.f.unsafe_ptr()
-        var pe_ptr  = pe_atom.unsafe_ptr()
-        var p_ptr   = self.params.unsafe_ptr()
-        var tid_ptr = tid_buf.unsafe_ptr()
-        var off_ptr = off_buf.unsafe_ptr()
-        var nb_ptr  = nb_buf.unsafe_ptr()
-        var soff_ptr = soff_buf.unsafe_ptr()
-        var snb_ptr  = snb_buf.unsafe_ptr()
-        var n_types = self.n_types
+        var x_ptr    = atoms.x.unsafe_ptr()
+        var f_ptr    = atoms.f.unsafe_ptr()
+        var pe_ptr   = pe_atom.unsafe_ptr()
+        var p_ptr    = self.params.unsafe_ptr()
+        var tid_ptr  = tid_buf.unsafe_ptr()
+        var off_ptr  = nlist.offsets.unsafe_ptr()
+        var nb_ptr   = nlist.neighbors.unsafe_ptr()
+        var soff_ptr = nlist.short_offsets.unsafe_ptr()
+        var snb_ptr  = nlist.short_neighbors.unsafe_ptr()
+        var n_types  = self.n_types
 
         # 2-body pass — pe_atom[m] gets the halved 2-body energy
         @parameter

@@ -1,7 +1,7 @@
 """Targeted performance measurement.
 
-LJ:        10M atoms  — CPU (3 steps, extrapolated) + GPU (100 steps)
-Vashishta: 128k atoms — CPU (20 steps) + GPU (100 steps)
+LJ:        1M atoms   — CPU (20 steps) + GPU (200 steps)
+Vashishta: 128k atoms — CPU (20 steps) + GPU (200 steps)
 
 Reports Matom·steps/s for each run.
 """
@@ -72,7 +72,7 @@ fn _make_lj_pair() -> PairLJ:
 fn _make_vashishta_pair() -> PairVashishta:
     var pair = PairVashishta(2)
     var p_sisi = make_vashishta_param(bigh=0.82023, eta=11.0, zi=1.6,  zj=1.6,  lambda1=999.0, bigd=0.0,   lambda4=999.0, bigw=0.0,     cut=5.0, bigb=0.0,    gamma=0.0, r0=0.0, bigc=0.0, costheta=-0.333)
-    var p_sioo = make_vashishta_param(bigh=188.0,  eta=9.0,  zi=1.6,  zj=-0.8, lambda1=10.0,  bigd=1.245, lambda4=4.43,  bigw=22.1179, cut=5.5, bigb=4.7325, gamma=1.0, r0=2.60, bigc=0.0, costheta=-0.777)
+    var p_sioo = make_vashishta_param(bigh=188.0,  eta=9.0,  zi=1.6,  zj=-0.8, lambda1=10.0,  bigd=1.245, lambda4=4.43,  bigw=22.1179, cut=5.5, bigb=4.7325, gamma=1.0, r0=2.60, bigc=0.0, costheta=-0.333)
     var p_osio = make_vashishta_param(bigh=188.0,  eta=9.0,  zi=-0.8, zj=1.6,  lambda1=10.0,  bigd=1.245, lambda4=4.43,  bigw=22.1179, cut=5.5, bigb=19.972, gamma=1.0, r0=2.60, bigc=0.0, costheta=-0.333)
     var p_ooo  = make_vashishta_param(bigh=88.0,   eta=7.0,  zi=-0.8, zj=-0.8, lambda1=10.0,  bigd=0.0,   lambda4=999.0, bigw=0.0,     cut=5.5, bigb=0.0,    gamma=0.0, r0=0.0, bigc=0.0, costheta=-0.333)
     var p_zero = make_vashishta_param(bigh=0.0,    eta=9.0,  zi=0.0,  zj=0.0,  lambda1=999.0, bigd=0.0,   lambda4=999.0, bigw=0.0,     cut=5.0, bigb=0.0,    gamma=0.0, r0=0.0, bigc=0.0, costheta=-0.333)
@@ -83,26 +83,27 @@ fn _make_vashishta_pair() -> PairVashishta:
     return pair^
 
 
-fn _report(label: String, n: Int, steps: Int, elapsed_ns: Int):
-    var elapsed = Float64(elapsed_ns) / 1.0e9
-    var matom_s = Float64(n) * Float64(steps) / elapsed / 1.0e6
-    print(label, "  N =", n, " steps =", steps,
-          " elapsed =", elapsed, "s  =>", matom_s, "Matom·steps/s")
+fn _report(label: String, n: Int, steps: Int, elapsed_s: Float64):
+    var matom_s = Float64(n) * Float64(steps) / elapsed_s / 1.0e6
+    print(label, " N =", n, " steps =", steps,
+          " elapsed =", elapsed_s, "s  =>  perf =", matom_s, "Matom·steps/s")
 
 
 def main() raises:
-    # ----------------------------------------------------------------
-    # LJ  —  10M atoms
-    # ----------------------------------------------------------------
-    var lj_n       = 10_000_000
-    var lj_cpu_steps = 3    # ~30s/step on CPU; 3 steps gives a good rate
-    var lj_gpu_steps = 100
+    var lj_n         = 1_000_000
+    var lj_cpu_steps = 200
+    var lj_gpu_steps = 200
+    var vs_n         = 256_000
+    var vs_cpu_steps = 200
+    var vs_gpu_steps = 200
 
-    print("Building LJ system (~10M atoms)…")
+    # ----------------------------------------------------------------
+    # LJ CPU
+    # ----------------------------------------------------------------
+    print("Building LJ system (~1M atoms)…")
     var lj_atoms_cpu = _build_fcc_atoms(lj_n)
     var lj_n_real    = lj_atoms_cpu.nlocal
     print("  actual N =", lj_n_real)
-
     print("LJ CPU: running", lj_cpu_steps, "steps…")
     var lj_pair_cpu = _make_lj_pair()
     var lj_sim_cpu  = Simulation[PairLJ, VelocityVerlet](
@@ -111,20 +112,16 @@ def main() raises:
     )
     var t0 = perf_counter_ns()
     lj_sim_cpu.run(lj_cpu_steps, print_interval=lj_cpu_steps + 1)
-    _report("LJ CPU  ", lj_n_real, lj_cpu_steps, perf_counter_ns() - t0)
+    var lj_cpu_s = Float64(perf_counter_ns() - t0) / 1.0e9
+    _report("LJ CPU     ", lj_n_real, lj_cpu_steps, lj_cpu_s)
 
     # ----------------------------------------------------------------
-    # Vashishta  —  128k atoms
+    # Vashishta CPU
     # ----------------------------------------------------------------
-    var vs_n        = 128_000
-    var vs_cpu_steps = 20
-    var vs_gpu_steps = 100
-
-    print("\nBuilding Vashishta system (~128k atoms)…")
+    print("\nBuilding Vashishta system (~256k atoms)…")
     var vs_atoms_cpu = _build_sio2_random(vs_n)
     var vs_n_real    = vs_atoms_cpu.nlocal
     print("  actual N =", vs_n_real)
-
     print("Vashishta CPU: running", vs_cpu_steps, "steps…")
     var vs_pair_cpu = _make_vashishta_pair()
     var vs_sim_cpu  = Simulation[PairVashishta, VelocityVerlet](
@@ -133,7 +130,8 @@ def main() raises:
     )
     t0 = perf_counter_ns()
     vs_sim_cpu.run(vs_cpu_steps, print_interval=vs_cpu_steps + 1)
-    _report("Vashishta CPU", vs_n_real, vs_cpu_steps, perf_counter_ns() - t0)
+    var vs_cpu_s = Float64(perf_counter_ns() - t0) / 1.0e9
+    _report("Vashishta CPU", vs_n_real, vs_cpu_steps, vs_cpu_s)
 
     # ----------------------------------------------------------------
     # GPU runs
@@ -141,7 +139,8 @@ def main() raises:
     comptime if has_accelerator():
         from std.gpu.host import DeviceContext
 
-        print("\nLJ GPU: running", lj_gpu_steps, "steps…")
+        # ---- LJ GPU ----
+        print("\nLJ GPU: warming up (Metal shader compilation)…")
         var lj_atoms_gpu = _build_fcc_atoms(lj_n)
         var lj_pair_gpu  = _make_lj_pair()
         var lj_ctx       = DeviceContext()
@@ -149,11 +148,17 @@ def main() raises:
             lj_atoms_gpu^, lj_pair_gpu^, VelocityVerlet(), lj_ctx^,
             dt=0.002, skin=0.3, rebuild_interval=10,
         )
+        lj_sim_gpu.run(5, print_interval=9999)   # trigger Metal JIT; not timed
+        print("  running", lj_gpu_steps, "timed steps…")
         t0 = perf_counter_ns()
         lj_sim_gpu.run(lj_gpu_steps, print_interval=lj_gpu_steps + 1)
-        _report("LJ GPU  ", lj_n_real, lj_gpu_steps, perf_counter_ns() - t0)
+        var lj_gpu_s = Float64(perf_counter_ns() - t0) / 1.0e9
+        _report("LJ GPU     ", lj_n_real, lj_gpu_steps, lj_gpu_s)
+        var lj_speedup = (lj_cpu_s / Float64(lj_cpu_steps)) / (lj_gpu_s / Float64(lj_gpu_steps))
+        print("  GPU speedup vs CPU:", lj_speedup, "x")
 
-        print("\nVashishta GPU: running", vs_gpu_steps, "steps…")
+        # ---- Vashishta GPU ----
+        print("\nVashishta GPU: warming up…")
         var vs_atoms_gpu = _build_sio2_random(vs_n)
         var vs_pair_gpu  = _make_vashishta_pair()
         var vs_ctx       = DeviceContext()
@@ -161,8 +166,13 @@ def main() raises:
             vs_atoms_gpu^, vs_pair_gpu^, VelocityVerlet(), vs_ctx^,
             dt=0.001, skin=0.3, rebuild_interval=10,
         )
+        vs_sim_gpu.run(5, print_interval=9999)   # trigger Metal JIT; not timed
+        print("  running", vs_gpu_steps, "timed steps…")
         t0 = perf_counter_ns()
         vs_sim_gpu.run(vs_gpu_steps, print_interval=vs_gpu_steps + 1)
-        _report("Vashishta GPU", vs_n_real, vs_gpu_steps, perf_counter_ns() - t0)
+        var vs_gpu_s = Float64(perf_counter_ns() - t0) / 1.0e9
+        _report("Vashishta GPU", vs_n_real, vs_gpu_steps, vs_gpu_s)
+        var vs_speedup = (vs_cpu_s / Float64(vs_cpu_steps)) / (vs_gpu_s / Float64(vs_gpu_steps))
+        print("  GPU speedup vs CPU:", vs_speedup, "x")
     else:
         print("\nNo GPU detected.")

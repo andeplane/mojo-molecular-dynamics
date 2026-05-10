@@ -190,32 +190,25 @@ struct PairLJ(PairStyle):
         return 0.0
 
     # ---- CPU dispatch ----
-    fn compute(mut self, mut atoms: Atoms, read nlist: NeighborList) -> Float64:
+    fn compute(mut self, mut atoms: Atoms, mut nlist: NeighborList) -> Float64:
         var nlocal = atoms.nlocal
         var pe_atom = List[Float64](capacity=nlocal)
         for _ in range(nlocal):
             pe_atom.append(0.0)
 
-        # Convert CPU's Int-based type_id and offsets/neighbors into the Int32
-        # layout the shared kernel body expects. Done once per call; cheap for
-        # the system sizes where the CPU path is the right choice.
-        var tid_buf = List[Int32]()
+        # type_id is List[Int] — convert once (nmax entries, small vs neighbor list).
+        var tid_buf = List[Int32](capacity=atoms.nmax)
         for i in range(atoms.nmax):
             tid_buf.append(Int32(atoms.type_id[i]))
-        var off_buf = List[Int32]()
-        for v in nlist.offsets:
-            off_buf.append(Int32(v))
-        var nb_buf = List[Int32]()
-        for v in nlist.neighbors:
-            nb_buf.append(Int32(v))
 
+        # Neighbor list is already List[Int32] — pass pointers directly, no copy.
         var x_ptr   = atoms.x.unsafe_ptr()
         var f_ptr   = atoms.f.unsafe_ptr()
         var pe_ptr  = pe_atom.unsafe_ptr()
         var p_ptr   = self.params.unsafe_ptr()
         var tid_ptr = tid_buf.unsafe_ptr()
-        var off_ptr = off_buf.unsafe_ptr()
-        var nb_ptr  = nb_buf.unsafe_ptr()
+        var off_ptr = nlist.offsets.unsafe_ptr()
+        var nb_ptr  = nlist.neighbors.unsafe_ptr()
         var n_types = self.n_types
 
         @parameter
