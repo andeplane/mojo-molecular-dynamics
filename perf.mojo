@@ -91,11 +91,11 @@ fn _report(label: String, n: Int, steps: Int, elapsed_s: Float64):
 
 def main() raises:
     var lj_n         = 1_000_000
-    var lj_cpu_steps = 200
-    var lj_gpu_steps = 200
+    var lj_cpu_steps = 50
+    var lj_gpu_steps = 500
     var vs_n         = 256_000
-    var vs_cpu_steps = 200
-    var vs_gpu_steps = 200
+    var vs_cpu_steps = 100
+    var vs_gpu_steps = 500
 
     # ----------------------------------------------------------------
     # LJ CPU

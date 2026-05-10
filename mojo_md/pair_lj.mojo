@@ -124,7 +124,10 @@ fn _lj_force_kernel(
     var ei:  Float32 = 0.0
     var start = Int(off_ptr[i]); var end = Int(off_ptr[i + 1])
     for nb in range(start, end):
-        var j = Int(nb_ptr[nb])
+        var j_raw = Int(nb_ptr[nb])
+        if j_raw < 0:
+            break   # sentinel — unused slot in GPU strided neighbor list
+        var j = j_raw
         var jtype = Int(type_id_ptr[j])
         var off = (n_types * itype + jtype) * _LJ_STRIDE
         var lj1    = p_ptr[off + _LJ_LJ1];  var lj2    = p_ptr[off + _LJ_LJ2]

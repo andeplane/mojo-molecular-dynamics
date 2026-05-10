@@ -1,9 +1,14 @@
 from std.algorithm import parallelize
+from std.atomic import Atomic
 from std.gpu import global_idx
 from std.gpu.host import DeviceContext, DeviceBuffer
 from std.math import ceildiv
 from mojo_md.atom import Atoms, GPUAtoms, GPUNeighborList
 from mojo_md.ghost import GhostBuilder
+from mojo_md.gpu_rebuild import (
+    wrap_into_box_gpu, rebuild_ghosts_gpu, nlist_build_gpu,
+    MAX_NEIGHBORS_PER_ATOM, MAX_SHORT_NEIGHBORS_PER_ATOM, MAX_ATOMS_PER_CELL,
+)
 from mojo_md.integrator import Integrator
 from mojo_md.neighbor import NeighborList
 from mojo_md.pair_style import PairStyle
@@ -27,23 +32,22 @@ fn _zero_forces_kernel(f_ptr: UnsafePointer[Float32, MutAnyOrigin], n: Int):
         f_ptr[i] = 0.0
 
 
+# One thread per ghost. Atomically add the ghost's force to its source atom.
+# O(N_ghost) — replaces the previous O(N_local × N_ghost) tag-scan.
 fn _reverse_comm_kernel(
     f_ptr:   UnsafePointer[Float32, MutAnyOrigin],
-    tag_ptr: UnsafePointer[Int32,   MutAnyOrigin],
+    src_ptr: UnsafePointer[Int32,   MutAnyOrigin],
     nlocal:  Int,
-    ntotal:  Int,
+    nghost:  Int,
 ):
-    var i = Int(global_idx.x)
-    if i >= nlocal:
+    var g = Int(global_idx.x)
+    if g >= nghost:
         return
-    var i_tag = tag_ptr[i]
-    var fx: Float32 = 0.0;  var fy: Float32 = 0.0;  var fz: Float32 = 0.0
-    for g in range(nlocal, ntotal):
-        if tag_ptr[g] == i_tag:
-            fx += f_ptr[3 * g]; fy += f_ptr[3 * g + 1]; fz += f_ptr[3 * g + 2]
-    f_ptr[3 * i]     += fx
-    f_ptr[3 * i + 1] += fy
-    f_ptr[3 * i + 2] += fz
+    var gi  = nlocal + g
+    var src = Int(src_ptr[g])
+    _ = Atomic.fetch_add(f_ptr + 3 * src,     f_ptr[3 * gi])
+    _ = Atomic.fetch_add(f_ptr + 3 * src + 1, f_ptr[3 * gi + 1])
+    _ = Atomic.fetch_add(f_ptr + 3 * src + 2, f_ptr[3 * gi + 2])
 
 
 # ---------------------------------------------------------------------------
@@ -154,11 +158,8 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
     call the same kernel bodies that the CPU paths do (one source of truth
     for the physics).
     """
-    var cpu_atoms:        Atoms                          # host-side mirror, used during rebuilds
-    var cpu_nlist:        NeighborList
-    var ghosts:           GhostBuilder
-    var atoms:            GPUAtoms                       # device-side state
-    var nlist:            GPUNeighborList
+    var atoms:            GPUAtoms                       # device-side state (positions, velocities, forces, …)
+    var nlist:            GPUNeighborList                # device-side strided neighbor list
     var pair:             Self.P
     var pair_params_dev:  DeviceBuffer[DType.float32]    # GPU mirror of pair params (Float32 for Metal/MPS)
     var integrator:       Self.I
@@ -167,6 +168,22 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
     var skin:             Float64
     var rebuild_interval: Int
     var step:             Int
+    # Box dimensions on host (constant for NVE), used as kernel scalar args.
+    var lx:               Float32
+    var ly:               Float32
+    var lz:               Float32
+    # Cell list grid (fixed at init).
+    var nc_x:             Int
+    var nc_y:             Int
+    var nc_z:             Int
+    var cell_lx:          Float32
+    var cell_ly:          Float32
+    var cell_lz:          Float32
+    # GPU rebuild scratch buffers (allocated once at init, reused every rebuild).
+    var cell_count_dev:   DeviceBuffer[DType.int32]      # nc Int32
+    var cell_atoms_dev:   DeviceBuffer[DType.int32]      # nc * MAX_ATOMS_PER_CELL Int32
+    var nghost_dev:       DeviceBuffer[DType.int32]      # 1 Int32 (atomic counter)
+    var overflow_dev:     DeviceBuffer[DType.int32]      # 1 Int32 (flag)
 
     fn __init__(
         out self,
@@ -186,21 +203,49 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
         self.integrator = integrator^
         self.ctx = ctx^
 
-        var rcut = self.pair.cutoff() + skin
+        var rcut       = self.pair.cutoff() + skin
         var rcut_short = self.pair.short_cutoff()
 
-        self.ghosts = GhostBuilder(rcut)
-        self.cpu_nlist = NeighborList(cpu_atoms.nlocal)
-        self.ghosts.rebuild_ghosts(cpu_atoms)
-        self.cpu_nlist.build(cpu_atoms, rcut, rcut_short)
-        cpu_atoms.zero_forces()
-        self.cpu_atoms = cpu_atoms^
+        # Box scalars cached on host.
+        self.lx = Float32(cpu_atoms.box[0])
+        self.ly = Float32(cpu_atoms.box[1])
+        self.lz = Float32(cpu_atoms.box[2])
 
-        self.atoms = GPUAtoms.from_cpu(self.cpu_atoms, self.ctx)
-        self.nlist = GPUNeighborList.from_cpu(self.cpu_nlist, self.ctx)
+        # Cell list grid sized off initial box + cutoff.
+        self.nc_x = max(1, Int(cpu_atoms.box[0] / rcut))
+        self.nc_y = max(1, Int(cpu_atoms.box[1] / rcut))
+        self.nc_z = max(1, Int(cpu_atoms.box[2] / rcut))
+        self.cell_lx = self.lx / Float32(self.nc_x)
+        self.cell_ly = self.ly / Float32(self.nc_y)
+        self.cell_lz = self.lz / Float32(self.nc_z)
+        var nc = self.nc_x * self.nc_y * self.nc_z
+
+        # Grow CPU mirror to give the GPU ghost build enough headroom in nmax.
+        # Worst-case ghost count is bounded by atoms-near-boundary × ~7 (corner
+        # atoms with 7 ghost copies). For typical orthogonal boxes a 100%
+        # headroom is more than enough; for tiny systems use a flat 4096 floor.
+        var nlocal = cpu_atoms.nlocal
+        var ghost_headroom = max(nlocal, 4096)
+        cpu_atoms.grow(nlocal + ghost_headroom)
+        cpu_atoms.zero_forces()
+
+        # Upload initial state to GPU (positions, velocities, types, etc.).
+        self.atoms = GPUAtoms.from_cpu(cpu_atoms, self.ctx)
+        self.nlist = GPUNeighborList.with_capacity(
+            nlocal, MAX_NEIGHBORS_PER_ATOM, MAX_SHORT_NEIGHBORS_PER_ATOM, self.ctx,
+        )
         self.pair_params_dev = self.pair.make_gpu_params(self.ctx)
 
-        # Initial force evaluation (so the first half_step_v has a valid f).
+        # Rebuild scratch buffers.
+        self.cell_count_dev = self.ctx.enqueue_create_buffer[DType.int32](nc)
+        self.cell_atoms_dev = self.ctx.enqueue_create_buffer[DType.int32](nc * MAX_ATOMS_PER_CELL)
+        self.nghost_dev     = self.ctx.enqueue_create_buffer[DType.int32](1)
+        self.overflow_dev   = self.ctx.enqueue_create_buffer[DType.int32](1)
+
+        # First-time GPU rebuild: wrap, ghosts, neighbor list — entirely on GPU.
+        self._gpu_rebuild(rcut, rcut_short)
+
+        # Initial force evaluation so the first half_step_v has valid forces.
         self._zero_forces_gpu()
         _ = self.pair.compute_gpu(self.atoms, self.nlist, self.pair_params_dev, self.ctx)
         self._reverse_comm_gpu()
@@ -215,17 +260,37 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
         )
 
     fn _reverse_comm_gpu(mut self) raises:
-        var nlocal = self.atoms.nlocal
-        if self.atoms.nghost == 0:
+        var nghost = self.atoms.nghost
+        if nghost == 0:
             return
-        var n_blocks = ceildiv(nlocal, _BLOCK_SIZE)
+        var n_blocks = ceildiv(nghost, _BLOCK_SIZE)
         self.ctx.enqueue_function[_reverse_comm_kernel, _reverse_comm_kernel](
             self.atoms.f.unsafe_ptr(),
-            self.atoms.tag.unsafe_ptr(),
-            nlocal,
-            self.atoms.n(),
+            self.atoms.source_idx.unsafe_ptr(),
+            self.atoms.nlocal,
+            nghost,
             grid_dim  = n_blocks,
             block_dim = _BLOCK_SIZE,
+        )
+
+    fn _gpu_rebuild(mut self, rcut: Float64, rcut_short: Float64) raises:
+        """Full GPU-resident rebuild: wrap positions, ghosts, cell list, nlist.
+        Only a single 4-byte readback (nghost) and 4-byte readback (overflow flag)."""
+        wrap_into_box_gpu(self.atoms, self.lx, self.ly, self.lz, self.ctx)
+        rebuild_ghosts_gpu(
+            self.atoms, self.nghost_dev, self.overflow_dev,
+            self.lx, self.ly, self.lz, Float32(rcut), self.ctx,
+        )
+        nlist_build_gpu(
+            self.atoms,
+            self.cell_count_dev, self.cell_atoms_dev,
+            self.nlist.neighbors, self.nlist.short_neighbors,
+            self.overflow_dev,
+            self.nc_x, self.nc_y, self.nc_z,
+            self.cell_lx, self.cell_ly, self.cell_lz,
+            Float32(rcut * rcut),
+            Float32(rcut_short * rcut_short),
+            self.ctx,
         )
 
     fn run(mut self, nsteps: Int, print_interval: Int = 100) raises:
@@ -239,14 +304,7 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
             self.integrator.full_step_x_gpu(self.atoms, self.ctx, self.dt)
 
             if self.step % self.rebuild_interval == 0:
-                # The one allowed CPU round-trip: pull positions, rebuild
-                # ghosts + neighbor list on CPU, push back updated bookkeeping.
-                self.atoms.read_positions_to_cpu(self.cpu_atoms, self.ctx)
-                self.ghosts.cutoff_with_skin = rcut
-                self.ghosts.rebuild_ghosts(self.cpu_atoms)
-                self.cpu_nlist.build(self.cpu_atoms, rcut, rcut_short)
-                self.atoms.refresh_from_cpu(self.cpu_atoms, self.ctx)
-                self.nlist.refresh_from_cpu(self.cpu_nlist, self.ctx)
+                self._gpu_rebuild(rcut, rcut_short)
 
             self._zero_forces_gpu()
             var pe = self.pair.compute_gpu(self.atoms, self.nlist, self.pair_params_dev, self.ctx)

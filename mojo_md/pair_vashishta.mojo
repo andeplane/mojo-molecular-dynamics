@@ -503,6 +503,8 @@ fn _vashishta_2body_kernel(
     var start = Int(off_ptr[i]); var end = Int(off_ptr[i + 1])
     for nb in range(start, end):
         var j = Int(nb_ptr[nb])
+        if j < 0:
+            break   # GPU strided list sentinel
         var jtype = Int(type_id_ptr[j])
         var off_ij = ((itype * n_types + jtype) * n_types + jtype) * _VS
         var cutsq = p_ptr[off_ij + _VS_CUTSQ]
@@ -548,6 +550,8 @@ fn _vashishta_3body_kernel(
     # ---- Case A: m is the apex ----
     for jj in range(nshort_m):
         var j = Int(snb_ptr[ss_m + jj])
+        if j < 0:
+            break   # GPU strided list sentinel
         var jtype = Int(type_id_ptr[j])
         var off_mj = ((mtype * n_types + jtype) * n_types + jtype) * _VS
         var d1x = x_ptr[3 * j]     - xm
@@ -563,6 +567,8 @@ fn _vashishta_3body_kernel(
         var expg1   = exp(gsrainv1)
         for kk in range(jj + 1, nshort_m):
             var k = Int(snb_ptr[ss_m + kk])
+            if k < 0:
+                break   # GPU strided list sentinel
             var ktype = Int(type_id_ptr[k])
             var off_mk = ((mtype * n_types + ktype) * n_types + ktype) * _VS
             var d2x = x_ptr[3 * k]     - xm
@@ -608,6 +614,8 @@ fn _vashishta_3body_kernel(
     # ---- Case B: m is a side atom of a triplet centered at A ----
     for ii in range(nshort_m):
         var A = Int(snb_ptr[ss_m + ii])
+        if A < 0:
+            break   # GPU strided list sentinel
         if A >= nlocal:
             continue
         var Atype = Int(type_id_ptr[A])
@@ -615,7 +623,10 @@ fn _vashishta_3body_kernel(
         var nshort_A = se_A - ss_A
         var pos_m = -1
         for nn in range(nshort_A):
-            if Int(snb_ptr[ss_A + nn]) == m:
+            var entry = Int(snb_ptr[ss_A + nn])
+            if entry < 0:
+                break   # GPU strided list sentinel
+            if entry == m:
                 pos_m = nn
                 break
         if pos_m < 0:
@@ -672,6 +683,8 @@ fn _vashishta_3body_kernel(
         # C > pos_m → m is "j" in triplet (A, m, C)
         for nn in range(pos_m + 1, nshort_A):
             var C = Int(snb_ptr[ss_A + nn])
+            if C < 0:
+                break   # GPU strided list sentinel
             var Ctype = Int(type_id_ptr[C])
             var off_AC = ((Atype * n_types + Ctype) * n_types + Ctype) * _VS
             var d_AC_x = x_ptr[3 * C]     - xA
