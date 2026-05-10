@@ -54,7 +54,7 @@ Generic driver struct. Compile-time specialisation allows inlining of the entire
 | `dt` | `Float64` | Timestep size |
 | `skin` | `Float64` | Verlet skin distance |
 | `rebuild_interval` | `Int` | Steps between neighbor list rebuilds |
-| `step` | `Int` | Current step counter |
+| `step_count` | `Int` | Current step counter |
 
 **Public methods** (library API):
 - `__init__(atoms, pair, integrator, dt, skin=0.3, rebuild_interval=10)` — constructor

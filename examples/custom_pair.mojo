@@ -19,11 +19,14 @@ struct HarmonicPair(PairStyle):
                 var r = (dx*dx + dy*dy + dz*dz) ** 0.5
                 var dr = r - self.r0
                 var f_mag = self.k * dr / r
+                # Full neighbor list: pair (i,j) and (j,i) both appear, so
+                # f_mag*dx on atom i from j is cancelled by -f_mag*dx on j from i —
+                # Newton's 3rd law is satisfied automatically without halving forces.
                 atoms.f[3*i]   += f_mag * dx
                 atoms.f[3*i+1] += f_mag * dy
                 atoms.f[3*i+2] += f_mag * dz
                 pe += 0.5 * self.k * dr * dr
-        return pe * 0.5  # full list double-counts
+        return pe * 0.5  # energy double-counted (each pair appears twice); forces are not
 
     fn cutoff(self) -> Float64: return self.r0 + 2.0
     fn short_cutoff(self) -> Float64: return 0.0

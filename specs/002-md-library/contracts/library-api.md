@@ -64,7 +64,7 @@ struct Atoms(Movable):
 ```mojo
 struct Simulation[P: PairStyle, I: Integrator](Movable):
     var atoms: Atoms
-    var step: Int
+    var step_count: Int
 
     fn __init__(
         out self,
@@ -87,7 +87,7 @@ struct Simulation[P: PairStyle, I: Integrator](Movable):
 **Invariants**:
 - `step()` always leaves forces consistent with the updated positions (no stale forces)
 - After construction, the simulation is already at step 0 with forces computed
-- `sim.step` counter increments by 1 per `step()` call
+- `sim.step_count` counter increments by 1 per `step()` call
 - `run()` is exactly equivalent to a caller loop over `step()` with the same print logic
 
 ---

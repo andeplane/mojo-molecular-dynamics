@@ -9,8 +9,11 @@ Auto-generated from all feature plans. Last updated: 2026-05-10
 ## Project Structure
 
 ```text
-src/
-tests/
+mojo_md/        — importable Mojo package (atom, simulation, pair styles, etc.)
+main.mojo       — CLI entry point
+examples/       — usage examples (library_usage.mojo, step_loop.mojo, etc.)
+test/           — unit and integration tests
+specs/          — feature specs and contracts
 ```
 
 ## Commands
