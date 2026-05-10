@@ -53,9 +53,9 @@ fn test_twobody_force_at_cutoff() raises:
 
 
 fn test_twobody_repulsion_close_range() raises:
-    """At very short range, repulsive term dominates; energy should be large positive."""
+    """At very short range with same-sign charges (Si-Si), Coulomb + H both repulsive."""
     var r: Float64 = 1.5   # very close
-    var result = _twobody(P_SiO, r * r)
+    var result = _twobody(P_SiSi, r * r)
     assert_true(result.energy > 0.0)
 
 
