@@ -1,10 +1,5 @@
-from atom import Atoms
-from integrator import VelocityVerlet
-from sim_io import run_from_file
-from pair_lj import PairLJ
-from pair_vashishta import PairVashishta, VashishtaParam
-from random_utils import init_velocities_mb
-from simulation import Simulation
+from mojo_md import Atoms, VelocityVerlet, PairLJ, PairVashishta, VashishtaParam, init_velocities_mb, Simulation
+from mojo_md.sim_io import run_from_file
 from std.sys import argv
 
 

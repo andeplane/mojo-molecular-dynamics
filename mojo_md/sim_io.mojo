@@ -1,10 +1,10 @@
 from std.python import Python, PythonObject
-from atom import Atoms
-from integrator import VelocityVerlet
-from pair_lj import PairLJ
-from pair_vashishta import PairVashishta, VashishtaParam
-from random_utils import init_velocities_mb
-from simulation import Simulation
+from mojo_md.atom import Atoms
+from mojo_md.integrator import VelocityVerlet
+from mojo_md.pair_lj import PairLJ
+from mojo_md.pair_vashishta import PairVashishta, VashishtaParam
+from mojo_md.random_utils import init_velocities_mb
+from mojo_md.simulation import Simulation
 
 
 fn _py_float(obj: PythonObject) raises -> Float64:

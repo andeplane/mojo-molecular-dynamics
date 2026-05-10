@@ -1,6 +1,5 @@
 from std.testing import assert_equal, assert_true, assert_almost_equal
-from atom import Atoms
-from neighbor import NeighborList
+from mojo_md import Atoms, NeighborList
 
 
 fn _cube4(box: Float64) -> Atoms:

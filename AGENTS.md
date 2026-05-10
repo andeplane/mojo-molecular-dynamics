@@ -10,21 +10,27 @@ periodic boundary conditions, and a parallelised force kernel designed for GPU p
 
 ```
 mojo-md/
-├── atom.mojo           — Atoms struct (SoA layout), PBC wrap utilities
-├── ghost.mojo          — Ghost atom builder + reverse-comm force fold
-├── neighbor.mojo       — Cell-list full neighbor list (CSR format)
-├── pair_style.mojo     — PairStyle trait definition
-├── pair_lj.mojo        — Lennard-Jones potential (multi-type, parallelised)
-├── pair_vashishta.mojo — Vashishta 2+3-body potential
-├── integrator.mojo     — Integrator trait + VelocityVerlet implementation
-├── simulation.mojo     — Generic Simulation[P, I] loop driver
-├── random_utils.mojo   — LCG RNG, Box-Muller, Maxwell-Boltzmann init
-├── sim_io.mojo         — JSON config loader (via Python interop)
-├── main.mojo           — Entry point + built-in demos
+├── mojo_md/                 — Importable Mojo package (from mojo_md import ...)
+│   ├── __init__.mojo        — Re-exports full public API
+│   ├── atom.mojo            — Atoms struct (SoA layout), PBC wrap utilities
+│   ├── ghost.mojo           — Ghost atom builder + reverse-comm force fold
+│   ├── neighbor.mojo        — Cell-list full neighbor list (CSR format)
+│   ├── pair_style.mojo      — PairStyle trait definition
+│   ├── pair_lj.mojo         — Lennard-Jones potential (multi-type, parallelised)
+│   ├── pair_vashishta.mojo  — Vashishta 2+3-body potential
+│   ├── integrator.mojo      — Integrator trait + VelocityVerlet implementation
+│   ├── simulation.mojo      — Generic Simulation[P, I] loop driver
+│   ├── random_utils.mojo    — LCG RNG, Box-Muller, Maxwell-Boltzmann init
+│   └── sim_io.mojo          — JSON config loader (via Python interop)
+├── main.mojo                — CLI entry point + built-in demos
 ├── examples/
-│   ├── argon.json      — 108-atom Ar FCC, LJ, 1000 steps
-│   └── sio2.json       — 9-atom SiO₂, Vashishta, 200 steps
-└── test/               — ~50 unit and integration tests
+│   ├── argon.json           — 108-atom Ar FCC, LJ, 1000 steps
+│   ├── sio2.json            — 9-atom SiO₂, Vashishta, 200 steps
+│   ├── library_usage.mojo   — Minimal LJ simulation using mojo_md package
+│   ├── step_loop.mojo       — Manual step() loop with per-step KE/PE access
+│   ├── custom_pair.mojo     — User-defined HarmonicPair style (no mojo_md edits)
+│   └── vashishta_usage.mojo — Library usage with Vashishta potential
+└── test/                    — ~50 unit and integration tests
     ├── test_atom.mojo
     ├── test_ghost.mojo
     ├── test_neighbor.mojo
@@ -33,6 +39,16 @@ mojo-md/
     ├── test_integrator.mojo
     └── test_integration.mojo
 ```
+
+### Import path for library consumers
+
+```bash
+mojo run -I /path/to/mojo-md your_script.mojo
+```
+
+Public API (all importable via `from mojo_md import ...`):
+`Atoms`, `Simulation`, `PairStyle`, `Integrator`, `PairLJ`, `PairVashishta`,
+`VashishtaParam`, `VelocityVerlet`, `NeighborList`, `init_velocities_mb`, `wrap_into_box`
 
 ---
 
@@ -90,17 +106,20 @@ fn short_cutoff(self) -> Float64
 into two half-steps around force evaluation. Both steps parallelised with
 `parallelize[fn](nlocal)`.
 
-### Simulation loop — `simulation.mojo`
+### Simulation loop — `mojo_md/simulation.mojo`
 
 `Simulation[P: PairStyle, I: Integrator]` — compile-time generics let the
 compiler inline and auto-vectorise the hot path.
 
-Each timestep:
+Each timestep (one call to `sim.step()` or internal to `sim.run()`):
 1. `half_step_v` (old forces)
 2. `full_step_x`
 3. Rebuild ghosts + neighbor list every `rebuild_interval` steps
 4. `zero_forces` → `pair.compute()` → `reverse_comm`
 5. `half_step_v` (new forces)
+
+`step()` returns PE; `run(N)` calls `step()` N times with periodic thermo output.
+Step counter stored in `sim.step_count`.
 
 ---
 

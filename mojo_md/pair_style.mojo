@@ -1,5 +1,5 @@
-from atom import Atoms
-from neighbor import NeighborList
+from mojo_md.atom import Atoms
+from mojo_md.neighbor import NeighborList
 
 
 trait PairStyle(Movable, ImplicitlyDestructible):

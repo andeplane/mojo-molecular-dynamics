@@ -1,6 +1,6 @@
 from std.math import sqrt
 from std.testing import assert_almost_equal, assert_true
-from pair_vashishta import VashishtaParam, _twobody, _threebody, QQR2E
+from mojo_md.pair_vashishta import VashishtaParam, _twobody, _threebody, QQR2E
 
 
 # Si-O Vashishta parameters (from LAMMPS SiO.1990.vashishta, Si-O-O entry)

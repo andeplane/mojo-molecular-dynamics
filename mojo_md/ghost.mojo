@@ -1,4 +1,4 @@
-from atom import Atoms, wrap_into_box
+from mojo_md.atom import Atoms, wrap_into_box
 
 
 struct GhostBuilder(Movable):

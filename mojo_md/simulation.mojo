@@ -1,8 +1,8 @@
-from atom import Atoms
-from ghost import GhostBuilder
-from integrator import Integrator
-from neighbor import NeighborList
-from pair_style import PairStyle
+from mojo_md.atom import Atoms
+from mojo_md.ghost import GhostBuilder
+from mojo_md.integrator import Integrator
+from mojo_md.neighbor import NeighborList
+from mojo_md.pair_style import PairStyle
 
 
 struct Simulation[P: PairStyle, I: Integrator](Movable):
@@ -32,7 +32,7 @@ struct Simulation[P: PairStyle, I: Integrator](Movable):
     var dt: Float64
     var skin: Float64
     var rebuild_interval: Int
-    var step: Int
+    var step_count: Int
 
     fn __init__(
         out self,
@@ -49,7 +49,7 @@ struct Simulation[P: PairStyle, I: Integrator](Movable):
         self.dt = dt
         self.skin = skin
         self.rebuild_interval = rebuild_interval
-        self.step = 0
+        self.step_count = 0
 
         var rcut = self.pair.cutoff() + skin
         var rcut_short = self.pair.short_cutoff()
@@ -63,36 +63,41 @@ struct Simulation[P: PairStyle, I: Integrator](Movable):
         _ = self.pair.compute(self.atoms, self.nlist)
         self.ghosts.reverse_comm(self.atoms)
 
-    fn run(mut self, nsteps: Int, print_interval: Int = 100):
-        """Advance simulation by nsteps timesteps."""
+    fn step(mut self) -> Float64:
+        """Advance one timestep. Returns potential energy."""
         var rcut = self.pair.cutoff() + self.skin
         var rcut_short = self.pair.short_cutoff()
 
+        self.step_count += 1
+
+        # Half velocity step (uses forces from previous step)
+        self.integrator.half_step_v(self.atoms, self.dt)
+        # Full position step
+        self.integrator.full_step_x(self.atoms, self.dt)
+
+        # Rebuild ghosts and neighbor list periodically
+        if self.step_count % self.rebuild_interval == 0:
+            self.ghosts.cutoff_with_skin = rcut
+            self.ghosts.rebuild_ghosts(self.atoms)
+            self.nlist.build(self.atoms, rcut, rcut_short)
+
+        # Force evaluation
+        self.atoms.zero_forces()
+        var pe = self.pair.compute(self.atoms, self.nlist)
+        self.ghosts.reverse_comm(self.atoms)
+
+        # Second half velocity step (uses new forces)
+        self.integrator.half_step_v(self.atoms, self.dt)
+
+        return pe
+
+    fn run(mut self, nsteps: Int, print_interval: Int = 100):
+        """Advance simulation by nsteps timesteps."""
         for _ in range(nsteps):
-            self.step += 1
-
-            # Half velocity step (uses forces from previous step)
-            self.integrator.half_step_v(self.atoms, self.dt)
-            # Full position step
-            self.integrator.full_step_x(self.atoms, self.dt)
-
-            # Rebuild ghosts and neighbor list periodically
-            if self.step % self.rebuild_interval == 0:
-                self.ghosts.cutoff_with_skin = rcut
-                self.ghosts.rebuild_ghosts(self.atoms)
-                self.nlist.build(self.atoms, rcut, rcut_short)
-
-            # Force evaluation
-            self.atoms.zero_forces()
-            var pe = self.pair.compute(self.atoms, self.nlist)
-            self.ghosts.reverse_comm(self.atoms)
-
-            # Second half velocity step (uses new forces)
-            self.integrator.half_step_v(self.atoms, self.dt)
-
-            if self.step % print_interval == 0:
+            var pe = self.step()
+            if self.step_count % print_interval == 0:
                 var ke = self.atoms.kinetic_energy()
-                print("step", self.step,
+                print("step", self.step_count,
                       "PE", pe,
                       "KE", ke,
                       "TE", pe + ke)

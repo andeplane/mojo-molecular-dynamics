@@ -1,5 +1,5 @@
 from std.math import sqrt, log, cos, pi
-from atom import Atoms
+from mojo_md.atom import Atoms
 
 comptime TWO_PI: Float64 = 2.0 * pi
 
