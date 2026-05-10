@@ -26,10 +26,10 @@ struct SimInput:
 
     fn __init__(
         out self,
-        owned atoms: Atoms,
+        var atoms: Atoms,
         pair_style: String,
-        owned lj_pair: PairLJ,
-        owned vashishta_pair: PairVashishta,
+        var lj_pair: PairLJ,
+        var vashishta_pair: PairVashishta,
         dt: Float64,
         skin: Float64,
         rebuild_interval: Int,

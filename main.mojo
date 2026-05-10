@@ -1,6 +1,6 @@
 from atom import Atoms
 from integrator import VelocityVerlet
-from io import load_input
+from sim_io import load_input
 from pair_lj import PairLJ
 from pair_vashishta import PairVashishta, VashishtaParam
 from random_utils import init_velocities_mb

@@ -47,9 +47,9 @@ struct Simulation[P: PairStyle, I: Integrator]:
 
     fn __init__(
         out self,
-        owned atoms: Atoms,
-        owned pair: P,
-        owned integrator: I,
+        var atoms: Atoms,
+        var pair: P,
+        var integrator: I,
         dt: Float64,
         skin: Float64 = 0.3,
         rebuild_interval: Int = 10,
