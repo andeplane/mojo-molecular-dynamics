@@ -4,7 +4,7 @@ from neighbor import NeighborList
 from pair_style import PairStyle
 
 
-struct LJParams:
+struct LJParams(Copyable, Movable):
     """
     Precomputed Lennard-Jones coefficients for one (i,j) type pair.
 
