@@ -8,7 +8,7 @@ from pair_style import PairStyle
 alias QQR2E: Float64 = 14.3996
 
 
-struct VashishtaParam(Copyable, Movable):
+struct VashishtaParam(ImplicitlyCopyable, Movable):
     """
     All parameters for a Vashishta (i,j,k) triplet entry, including
     precomputed derived quantities to avoid redundant work in the inner loop.
