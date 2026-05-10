@@ -121,9 +121,15 @@ struct VashishtaParam(ImplicitlyCopyable, Movable):
         self.c0 = cut * self.dvrc - vrc
 
 
-struct TwobodyResult:
+struct TwobodyResult(ImplicitlyCopyable, Movable):
     var fforce: Float64   # scalar: multiply by displacement to get force vector
     var energy: Float64
+
+    fn __copyinit__(out self, other: TwobodyResult):
+        self.fforce = other.fforce; self.energy = other.energy
+
+    fn __moveinit__(out self, deinit other: TwobodyResult):
+        self.fforce = other.fforce; self.energy = other.energy
 
     fn __init__(out self, fforce: Float64, energy: Float64):
         self.fforce = fforce
@@ -157,11 +163,21 @@ fn _twobody(param: VashishtaParam, rsq: Float64) -> TwobodyResult:
     return TwobodyResult(fforce, eng)
 
 
-struct ThreebodyResult:
+struct ThreebodyResult(ImplicitlyCopyable, Movable):
     """Return type for _threebody to avoid bare tuple unpacking."""
     var fj_x: Float64; var fj_y: Float64; var fj_z: Float64
     var fk_x: Float64; var fk_y: Float64; var fk_z: Float64
     var energy: Float64
+
+    fn __copyinit__(out self, other: ThreebodyResult):
+        self.fj_x=other.fj_x; self.fj_y=other.fj_y; self.fj_z=other.fj_z
+        self.fk_x=other.fk_x; self.fk_y=other.fk_y; self.fk_z=other.fk_z
+        self.energy=other.energy
+
+    fn __moveinit__(out self, deinit other: ThreebodyResult):
+        self.fj_x=other.fj_x; self.fj_y=other.fj_y; self.fj_z=other.fj_z
+        self.fk_x=other.fk_x; self.fk_y=other.fk_y; self.fk_z=other.fk_z
+        self.energy=other.energy
 
     fn __init__(out self, fj_x: Float64, fj_y: Float64, fj_z: Float64,
                            fk_x: Float64, fk_y: Float64, fk_z: Float64,
