@@ -16,22 +16,25 @@ fn run_from_file(path: String) raises:
     """Load and run a simulation defined by a JSON config file."""
     var inp = load_input(path)
     var intg = VelocityVerlet()
-    # Copy scalar run parameters before consuming inp fields.
+    # Extract all fields before any branching so inp is fully consumed.
     var dt               = inp.dt
     var skin             = inp.skin
     var rebuild_interval = inp.rebuild_interval
     var nsteps           = inp.nsteps
     var print_interval   = inp.print_interval
     var pair_style       = inp.pair_style
+    var atoms            = inp.atoms^
+    var lj_pair          = inp.lj_pair^
+    var vash_pair        = inp.vashishta_pair^
     if pair_style == "lj":
         var sim = Simulation[PairLJ, VelocityVerlet](
-            inp.atoms^, inp.lj_pair^, intg^,
+            atoms^, lj_pair^, intg^,
             dt=dt, skin=skin, rebuild_interval=rebuild_interval,
         )
         sim.run(nsteps, print_interval)
     elif pair_style == "vashishta":
         var sim = Simulation[PairVashishta, VelocityVerlet](
-            inp.atoms^, inp.vashishta_pair^, intg^,
+            atoms^, vash_pair^, intg^,
             dt=dt, skin=skin, rebuild_interval=rebuild_interval,
         )
         sim.run(nsteps, print_interval)
