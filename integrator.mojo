@@ -2,7 +2,7 @@ from algorithm import parallelize
 from atom import Atoms
 
 
-trait Integrator:
+trait Integrator(Movable):
     """
     Interface for time integrators.
 
