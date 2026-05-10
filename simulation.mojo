@@ -34,7 +34,7 @@ struct Simulation[P: PairStyle, I: Integrator]:
     var rebuild_interval: Int
     var step: Int
 
-    fn __moveinit__(out self, owned other: Simulation[P, I]):
+    fn __moveinit__(out self, deinit other: Simulation[P, I]):
         self.atoms = other.atoms^
         self.pair = other.pair^
         self.integrator = other.integrator^

@@ -27,7 +27,7 @@ struct NeighborList:
     var build_cutoff: Float64
     var build_short_cutoff: Float64
 
-    fn __moveinit__(out self, owned other: NeighborList):
+    fn __moveinit__(out self, deinit other: NeighborList):
         self.nlocal = other.nlocal
         self.offsets = other.offsets^
         self.neighbors = other.neighbors^

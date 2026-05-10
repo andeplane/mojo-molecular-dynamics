@@ -32,7 +32,7 @@ struct LJParams(ImplicitlyCopyable, Movable):
         self.rc_sq = other.rc_sq
         self.energy_shift = other.energy_shift
 
-    fn __moveinit__(out self, owned other: LJParams):
+    fn __moveinit__(out self, deinit other: LJParams):
         self.lj1 = other.lj1
         self.lj2 = other.lj2
         self.lj3 = other.lj3
@@ -67,7 +67,7 @@ struct PairLJ(PairStyle):
     var params: List[LJParams]
     var _cutoff: Float64
 
-    fn __moveinit__(out self, owned other: PairLJ):
+    fn __moveinit__(out self, deinit other: PairLJ):
         self.n_types = other.n_types
         self.params = other.params^
         self._cutoff = other._cutoff

@@ -39,7 +39,7 @@ struct VelocityVerlet(Integrator):
     Energy conservation is second-order in dt.
     """
 
-    fn __moveinit__(out self, owned other: VelocityVerlet):
+    fn __moveinit__(out self, deinit other: VelocityVerlet):
         pass
 
     fn __init__(out self):

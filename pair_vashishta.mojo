@@ -63,7 +63,7 @@ struct VashishtaParam(ImplicitlyCopyable, Movable):
         self.big2b=other.big2b; self.big6w=other.big6w; self.cutsq=other.cutsq
         self.cutsq2=other.cutsq2; self.dvrc=other.dvrc; self.c0=other.c0
 
-    fn __moveinit__(out self, owned other: VashishtaParam):
+    fn __moveinit__(out self, deinit other: VashishtaParam):
         self.bigh=other.bigh; self.eta=other.eta; self.zi=other.zi; self.zj=other.zj
         self.lambda1=other.lambda1; self.bigd=other.bigd; self.lambda4=other.lambda4
         self.bigw=other.bigw; self.cut=other.cut; self.bigb=other.bigb
@@ -249,7 +249,7 @@ struct PairVashishta(PairStyle):
     var _cutoff: Float64
     var _r0_max: Float64
 
-    fn __moveinit__(out self, owned other: PairVashishta):
+    fn __moveinit__(out self, deinit other: PairVashishta):
         self.n_types = other.n_types
         self.params = other.params^
         self._cutoff = other._cutoff
