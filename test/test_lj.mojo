@@ -1,7 +1,6 @@
 from std.testing import assert_almost_equal, assert_true
-from atom import Atoms
-from neighbor import NeighborList
-from pair_lj import PairLJ, LJParams
+from mojo_md import Atoms, PairLJ, NeighborList
+from mojo_md.pair_lj import LJParams
 
 
 # Argon reference parameters

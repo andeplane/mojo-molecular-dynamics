@@ -1,6 +1,6 @@
 from std.testing import assert_equal, assert_almost_equal, assert_true
-from atom import Atoms
-from ghost import GhostBuilder
+from mojo_md import Atoms
+from mojo_md.ghost import GhostBuilder
 
 
 fn _make_atom(x: Float64, y: Float64, z: Float64, box: Float64) -> Atoms:

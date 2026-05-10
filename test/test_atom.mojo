@@ -1,5 +1,6 @@
 from std.testing import assert_equal, assert_almost_equal, assert_true
-from atom import Atoms, minimum_image, wrap_into_box, _floor
+from mojo_md import Atoms, wrap_into_box, minimum_image
+from mojo_md.atom import _floor
 
 
 fn test_n_total() raises:

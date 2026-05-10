@@ -1,7 +1,7 @@
 from std.algorithm import parallelize
-from atom import Atoms
-from neighbor import NeighborList
-from pair_style import PairStyle
+from mojo_md.atom import Atoms
+from mojo_md.neighbor import NeighborList
+from mojo_md.pair_style import PairStyle
 
 
 struct LJParams(ImplicitlyCopyable, Movable):

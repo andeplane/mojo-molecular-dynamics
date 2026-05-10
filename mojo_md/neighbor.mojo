@@ -1,5 +1,5 @@
 from std.math import sqrt
-from atom import Atoms
+from mojo_md.atom import Atoms
 
 
 struct NeighborList(Movable):

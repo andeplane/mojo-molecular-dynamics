@@ -1,5 +1,5 @@
 from std.algorithm import parallelize
-from atom import Atoms
+from mojo_md.atom import Atoms
 
 
 trait Integrator(Movable, ImplicitlyDestructible):

@@ -1,11 +1,7 @@
 from std.math import sqrt
 from std.testing import assert_almost_equal, assert_true
-from atom import Atoms
-from ghost import GhostBuilder
-from integrator import VelocityVerlet
-from neighbor import NeighborList
-from pair_lj import PairLJ
-from simulation import Simulation
+from mojo_md import Atoms, VelocityVerlet, NeighborList, PairLJ, Simulation
+from mojo_md.ghost import GhostBuilder
 
 
 # LJ Argon parameters

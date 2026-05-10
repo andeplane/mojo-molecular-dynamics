@@ -1,6 +1,5 @@
 from std.testing import assert_almost_equal
-from atom import Atoms
-from integrator import VelocityVerlet
+from mojo_md import Atoms, VelocityVerlet
 
 
 fn _single_atom(m: Float64, vx: Float64, vy: Float64, vz: Float64,
