@@ -185,7 +185,7 @@ alias TIMEOUT_S: Float64 = 30.0
 # CPU benchmarks — T019 (LJ), T021 (Vashishta)
 # ---------------------------------------------------------------------------
 
-fn _bench_cpu_lj(n_atoms: Int, timed_out: Bool) -> BenchmarkResult:
+fn _bench_cpu_lj(n_atoms: Int, timed_out: Bool, timeout_s: Float64) -> BenchmarkResult:
     """Run one LJ CPU benchmark at the given atom count."""
     if timed_out:
         return BenchmarkResult("LJ", n_atoms, "CPU", 0, 0.0, 0.0, True, False)
@@ -204,11 +204,11 @@ fn _bench_cpu_lj(n_atoms: Int, timed_out: Bool) -> BenchmarkResult:
 
     var elapsed  = Float64(t1 - t0) / 1.0e9
     var matom_ss = Float64(actual_n) * Float64(n_steps) / elapsed / 1.0e6
-    var did_tout = elapsed > TIMEOUT_S
+    var did_tout = elapsed > timeout_s
     return BenchmarkResult("LJ", actual_n, "CPU", n_steps, elapsed, matom_ss, did_tout, False)
 
 
-fn _bench_cpu_vashishta(n_atoms: Int, timed_out: Bool) -> BenchmarkResult:
+fn _bench_cpu_vashishta(n_atoms: Int, timed_out: Bool, timeout_s: Float64) -> BenchmarkResult:
     """Run one Vashishta CPU benchmark at the given atom count."""
     if timed_out:
         return BenchmarkResult("Vashishta", n_atoms, "CPU", 0, 0.0, 0.0, True, False)
@@ -227,7 +227,7 @@ fn _bench_cpu_vashishta(n_atoms: Int, timed_out: Bool) -> BenchmarkResult:
 
     var elapsed  = Float64(t1 - t0) / 1.0e9
     var matom_ss = Float64(actual_n) * Float64(n_steps) / elapsed / 1.0e6
-    var did_tout = elapsed > TIMEOUT_S
+    var did_tout = elapsed > timeout_s
     return BenchmarkResult("Vashishta", actual_n, "CPU", n_steps, elapsed, matom_ss, did_tout, False)
 
 
@@ -348,15 +348,24 @@ fn _write_csv(results: List[BenchmarkResult], path: String) raises:
 # main — T018, T019, T020, T021, T022, T023
 # ---------------------------------------------------------------------------
 
-fn main() raises:
-    var args     = argv()
-    var csv_path = ""
-    for i in range(len(args) - 1):
-        if args[i] == "--csv":
-            csv_path = args[i + 1]
-            break
+fn _quick_ladder() -> SIZE_LADDER:
+    var s = SIZE_LADDER()
+    s.append(1000); s.append(5000); s.append(25000); s.append(100000)
+    return s^
 
-    var sizes   = _size_ladder()
+
+fn main() raises:
+    var args      = argv()
+    var csv_path  = ""
+    var is_quick  = False
+    for i in range(len(args)):
+        if args[i] == "--quick":
+            is_quick = True
+        if args[i] == "--csv" and i + 1 < len(args):
+            csv_path = args[i + 1]
+
+    var timeout_s: Float64 = 5.0 if is_quick else TIMEOUT_S
+    var sizes   = _quick_ladder() if is_quick else _size_ladder()
     var results = List[BenchmarkResult]()
 
     # ----------------------------------------------------------------
@@ -367,16 +376,14 @@ fn main() raises:
 
     for i in range(len(sizes)):
         var n = sizes[i]
-        var r = _bench_cpu_lj(n, lj_cpu_timed_out)
+        var r = _bench_cpu_lj(n, lj_cpu_timed_out, timeout_s)
         if r.timed_out and not lj_cpu_timed_out:
             lj_cpu_timed_out = True
         lj_cpu_matom.append(r.matom_steps_s)
         results.append(r^)
 
     # GPU LJ — T020
-    # comptime if False: Metal enqueue_function not yet supported; flip to
-    # `has_accelerator()` once Mojo's Metal GPU backend is available.
-    comptime if False:
+    comptime if has_accelerator():
         from std.gpu.host import DeviceContext
 
         for i in range(len(sizes)):
@@ -408,14 +415,14 @@ fn main() raises:
 
     for i in range(len(sizes)):
         var n = sizes[i]
-        var r = _bench_cpu_vashishta(n, vash_cpu_timed_out)
+        var r = _bench_cpu_vashishta(n, vash_cpu_timed_out, timeout_s)
         if r.timed_out and not vash_cpu_timed_out:
             vash_cpu_timed_out = True
         vash_cpu_matom.append(r.matom_steps_s)
         results.append(r^)
 
     # GPU Vashishta — T021
-    comptime if False:
+    comptime if has_accelerator():
         from std.gpu.host import DeviceContext
 
         for i in range(len(sizes)):

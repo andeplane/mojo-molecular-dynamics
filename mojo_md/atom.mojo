@@ -220,10 +220,17 @@ struct GPUAtoms(Movable):
         )
 
     fn refresh_from_cpu(mut self, read atoms: Atoms, ctx: DeviceContext) raises:
-        """After a CPU-side ghost+nlist rebuild, re-upload x, type_id, tag (Float64→Float32)."""
+        """After a CPU-side ghost+nlist rebuild, re-upload x, type_id, tag (Float64→Float32).
+        Reallocates device buffers if nmax grew so copy never exceeds buffer length."""
         self.nlocal = atoms.nlocal
         self.nghost = atoms.nghost
-        self.nmax   = atoms.nmax
+
+        # Reallocate device buffers if nmax grew (ghost atoms pushed us past old capacity).
+        if atoms.nmax > self.nmax:
+            self.nmax    = atoms.nmax
+            self.x       = ctx.enqueue_create_buffer[DType.float32](3 * self.nmax)
+            self.type_id = ctx.enqueue_create_buffer[DType.int32](self.nmax)
+            self.tag     = ctx.enqueue_create_buffer[DType.int32](self.nmax)
 
         var h_x   = ctx.enqueue_create_host_buffer[DType.float32](3 * self.nmax)
         var h_tid = ctx.enqueue_create_host_buffer[DType.int32](self.nmax)
@@ -331,12 +338,18 @@ struct GPUNeighborList(Movable):
         return GPUNeighborList(nlocal, off_dev^, nb_dev^, soff_dev^, snb_dev^)
 
     fn refresh_from_cpu(mut self, read nlist: NeighborList, ctx: DeviceContext) raises:
-        """Re-upload after each CPU-side rebuild."""
+        """Re-upload after each CPU-side rebuild. Always reallocates device buffers
+        since neighbor count changes each step (new ghost atoms, different occupancy)."""
         var nlocal = nlist.nlocal
         var n_off  = nlocal + 1
         var n_nb   = max(len(nlist.neighbors), 1)
         var n_snb  = max(len(nlist.short_neighbors), 1)
         self.nlocal = nlocal
+
+        self.offsets         = ctx.enqueue_create_buffer[DType.int32](n_off)
+        self.neighbors       = ctx.enqueue_create_buffer[DType.int32](n_nb)
+        self.short_offsets   = ctx.enqueue_create_buffer[DType.int32](n_off)
+        self.short_neighbors = ctx.enqueue_create_buffer[DType.int32](n_snb)
 
         var h_off  = ctx.enqueue_create_host_buffer[DType.int32](n_off)
         var h_nb   = ctx.enqueue_create_host_buffer[DType.int32](n_nb)

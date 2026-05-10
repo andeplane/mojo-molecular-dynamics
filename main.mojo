@@ -138,40 +138,32 @@ fn demo_sio2():
 
 fn demo_argon_gpu() raises:
     """108 Ar atoms on FCC lattice, LJ potential — GPU path."""
-    # comptime if False: Mojo Metal backend does not yet support enqueue_function.
-    # Flip to `comptime if has_accelerator():` once the Metal compiler bug is fixed.
-    comptime if False:
-        print("=== Demo: Argon (Lennard-Jones) [MPS GPU] ===")
-        var atoms = _build_argon_atoms()
-        var pair  = _make_lj_pair()
-        init_velocities_mb(atoms, 0.0081)
-        var ctx = DeviceContext()
-        var sim = SimulationGPU[PairLJ, VelocityVerlet](
-            atoms^, pair^, VelocityVerlet(), ctx^,
-            dt=0.002, skin=0.3, rebuild_interval=10,
-        )
-        sim.run(1000, print_interval=100)
-        print("Argon GPU demo complete.")
-    else:
-        print("[mojo-md] MPS GPU demos are not yet available: Mojo's Metal enqueue_function backend is under development.")
+    print("=== Demo: Argon (Lennard-Jones) [MPS GPU] ===")
+    var atoms = _build_argon_atoms()
+    var pair  = _make_lj_pair()
+    init_velocities_mb(atoms, 0.0081)
+    var ctx = DeviceContext()
+    var sim = SimulationGPU[PairLJ, VelocityVerlet](
+        atoms^, pair^, VelocityVerlet(), ctx^,
+        dt=0.002, skin=0.3, rebuild_interval=10,
+    )
+    sim.run(1000, print_interval=100)
+    print("Argon GPU demo complete.")
 
 
 fn demo_sio2_gpu() raises:
     """9-atom SiO₂ cluster, Vashishta potential — GPU path."""
-    comptime if False:
-        print("=== Demo: SiO₂ (Vashishta) [MPS GPU] ===")
-        var atoms = _build_sio2_atoms()
-        var pair  = _make_vashishta_pair()
-        init_velocities_mb(atoms, 0.01)
-        var ctx = DeviceContext()
-        var sim = SimulationGPU[PairVashishta, VelocityVerlet](
-            atoms^, pair^, VelocityVerlet(), ctx^,
-            dt=0.001, skin=0.3, rebuild_interval=5,
-        )
-        sim.run(200, print_interval=50)
-        print("SiO₂ GPU demo complete.")
-    else:
-        print("[mojo-md] MPS GPU demos are not yet available: Mojo's Metal enqueue_function backend is under development.")
+    print("=== Demo: SiO₂ (Vashishta) [MPS GPU] ===")
+    var atoms = _build_sio2_atoms()
+    var pair  = _make_vashishta_pair()
+    init_velocities_mb(atoms, 0.01)
+    var ctx = DeviceContext()
+    var sim = SimulationGPU[PairVashishta, VelocityVerlet](
+        atoms^, pair^, VelocityVerlet(), ctx^,
+        dt=0.001, skin=0.3, rebuild_interval=5,
+    )
+    sim.run(200, print_interval=50)
+    print("SiO₂ GPU demo complete.")
 
 
 # ---------------------------------------------------------------------------
