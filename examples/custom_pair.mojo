@@ -18,7 +18,7 @@ struct HarmonicPair(PairStyle):
                 var dz = atoms.x[3*j+2] - atoms.x[3*i+2]
                 var r = (dx*dx + dy*dy + dz*dz) ** 0.5
                 var dr = r - self.r0
-                var f_mag = -self.k * dr / r
+                var f_mag = self.k * dr / r
                 atoms.f[3*i]   += f_mag * dx
                 atoms.f[3*i+1] += f_mag * dy
                 atoms.f[3*i+2] += f_mag * dz
