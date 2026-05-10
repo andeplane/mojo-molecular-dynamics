@@ -16,20 +16,27 @@ fn run_from_file(path: String) raises:
     """Load and run a simulation defined by a JSON config file."""
     var inp = load_input(path)
     var intg = VelocityVerlet()
-    if inp.pair_style == "lj":
+    # Copy scalar run parameters before consuming inp fields.
+    var dt               = inp.dt
+    var skin             = inp.skin
+    var rebuild_interval = inp.rebuild_interval
+    var nsteps           = inp.nsteps
+    var print_interval   = inp.print_interval
+    var pair_style       = inp.pair_style
+    if pair_style == "lj":
         var sim = Simulation[PairLJ, VelocityVerlet](
             inp.atoms^, inp.lj_pair^, intg^,
-            dt=inp.dt, skin=inp.skin, rebuild_interval=inp.rebuild_interval,
+            dt=dt, skin=skin, rebuild_interval=rebuild_interval,
         )
-        sim.run(inp.nsteps, inp.print_interval)
-    elif inp.pair_style == "vashishta":
+        sim.run(nsteps, print_interval)
+    elif pair_style == "vashishta":
         var sim = Simulation[PairVashishta, VelocityVerlet](
             inp.atoms^, inp.vashishta_pair^, intg^,
-            dt=inp.dt, skin=inp.skin, rebuild_interval=inp.rebuild_interval,
+            dt=dt, skin=skin, rebuild_interval=rebuild_interval,
         )
-        sim.run(inp.nsteps, inp.print_interval)
+        sim.run(nsteps, print_interval)
     else:
-        raise Error("Unknown pair_style: " + inp.pair_style)
+        raise Error("Unknown pair_style: " + pair_style)
 
 
 # ---------------------------------------------------------------------------
