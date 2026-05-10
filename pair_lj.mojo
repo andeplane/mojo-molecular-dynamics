@@ -51,6 +51,11 @@ struct PairLJ(PairStyle):
     var params: List[LJParams]
     var _cutoff: Float64
 
+    fn __moveinit__(out self, owned other: PairLJ):
+        self.n_types = other.n_types
+        self.params = other.params^
+        self._cutoff = other._cutoff
+
     fn __init__(out self, n_types: Int):
         self.n_types = n_types
         self.params = List[LJParams](capacity=n_types * n_types)

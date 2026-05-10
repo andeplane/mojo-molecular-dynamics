@@ -229,6 +229,12 @@ struct PairVashishta(PairStyle):
     var _cutoff: Float64
     var _r0_max: Float64
 
+    fn __moveinit__(out self, owned other: PairVashishta):
+        self.n_types = other.n_types
+        self.params = other.params^
+        self._cutoff = other._cutoff
+        self._r0_max = other._r0_max
+
     fn __init__(out self, n_types: Int):
         self.n_types = n_types
         self.params = List[VashishtaParam](capacity=n_types * n_types * n_types)

@@ -23,6 +23,18 @@ struct Atoms:
 
     var box: List[Float64] # [lx, ly, lz] — orthogonal periodic box
 
+    fn __moveinit__(out self, owned other: Atoms):
+        self.nlocal = other.nlocal
+        self.nghost = other.nghost
+        self.nmax = other.nmax
+        self.x = other.x^
+        self.v = other.v^
+        self.f = other.f^
+        self.mass = other.mass^
+        self.type_id = other.type_id^
+        self.tag = other.tag^
+        self.box = other.box^
+
     fn __init__(out self, nlocal: Int, lx: Float64, ly: Float64, lz: Float64):
         self.nlocal = nlocal
         self.nghost = 0

@@ -14,6 +14,9 @@ struct GhostBuilder:
     """
     var cutoff_with_skin: Float64
 
+    fn __moveinit__(out self, owned other: GhostBuilder):
+        self.cutoff_with_skin = other.cutoff_with_skin
+
     fn __init__(out self, cutoff_with_skin: Float64):
         self.cutoff_with_skin = cutoff_with_skin
 
