@@ -17,7 +17,7 @@ alias RC:  Float64 = 8.5
 fn _ar_pair() -> PairLJ:
     var p = PairLJ(1)
     p.set_pair(0, 0, EPS, SIG, RC)
-    return p
+    return p^
 
 
 fn _2atom_atoms(r: Float64) -> Atoms:
@@ -28,13 +28,13 @@ fn _2atom_atoms(r: Float64) -> Atoms:
     a.mass[0] = 39.948; a.mass[1] = 39.948
     a.type_id[0] = 0;   a.type_id[1] = 0
     a.tag[0] = 0;       a.tag[1] = 1
-    return a
+    return a^
 
 
 fn _build_nlist(atoms: Atoms, cutoff: Float64) -> NeighborList:
     var nlist = NeighborList(atoms.nlocal)
     nlist.build(atoms, cutoff)
-    return nlist
+    return nlist^
 
 
 fn test_lj_force_symmetry_2atom() raises:

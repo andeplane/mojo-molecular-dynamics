@@ -7,7 +7,7 @@ fn _make_atom(x: Float64, y: Float64, z: Float64, box: Float64) -> Atoms:
     var a = Atoms(1, box, box, box)
     a.x[0] = x; a.x[1] = y; a.x[2] = z
     a.mass[0] = 1.0; a.type_id[0] = 0; a.tag[0] = 0
-    return a
+    return a^
 
 
 fn test_ghost_count_interior() raises:

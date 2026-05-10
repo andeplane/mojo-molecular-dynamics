@@ -11,7 +11,7 @@ fn _single_atom(m: Float64, vx: Float64, vy: Float64, vz: Float64,
     a.f[0] = fx; a.f[1] = fy; a.f[2] = fz
     a.x[0] = 0.0; a.x[1] = 0.0; a.x[2] = 0.0
     a.tag[0] = 0; a.type_id[0] = 0
-    return a
+    return a^
 
 
 fn test_half_step_v_formula() raises:

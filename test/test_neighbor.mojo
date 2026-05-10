@@ -13,7 +13,7 @@ fn _cube4(box: Float64) -> Atoms:
     a.x[9]=0.0; a.x[10]=0.0; a.x[11]=1.0
     for i in range(4):
         a.mass[i] = 1.0; a.type_id[i] = 0; a.tag[i] = i
-    return a
+    return a^
 
 
 fn test_all_pairs_found() raises:

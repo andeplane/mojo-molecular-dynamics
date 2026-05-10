@@ -22,7 +22,7 @@ fn _make_2atom(r: Float64) -> Atoms:
     a.mass[0] = 39.948; a.mass[1] = 39.948
     a.type_id[0] = 0;   a.type_id[1] = 0
     a.tag[0] = 0;       a.tag[1] = 1
-    return a
+    return a^
 
 
 fn _make_nlist_2atom() -> NeighborList:
@@ -32,7 +32,7 @@ fn _make_nlist_2atom() -> NeighborList:
     nlist.neighbors.append(1); nlist.neighbors.append(0)
     nlist.short_offsets.append(0); nlist.short_offsets.append(0); nlist.short_offsets.append(0)
     nlist.build_cutoff = RC + 0.3
-    return nlist
+    return nlist^
 
 
 fn test_lj_params_lj1() raises:
