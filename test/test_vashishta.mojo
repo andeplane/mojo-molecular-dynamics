@@ -1,4 +1,4 @@
-from math import sqrt, exp, pow
+from math import sqrt
 from testing import assert_almost_equal, assert_true
 from pair_vashishta import VashishtaParam, _twobody, _threebody, QQR2E
 

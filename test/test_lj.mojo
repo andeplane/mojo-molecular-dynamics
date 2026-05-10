@@ -1,4 +1,3 @@
-from math import pow
 from testing import assert_almost_equal, assert_true
 from atom import Atoms
 from neighbor import NeighborList

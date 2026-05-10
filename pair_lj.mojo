@@ -24,6 +24,22 @@ struct LJParams:
     var rc_sq: Float64       # cutoff^2
     var energy_shift: Float64  # V(rc) subtracted from every r < rc
 
+    fn __copyinit__(out self, other: LJParams):
+        self.lj1 = other.lj1
+        self.lj2 = other.lj2
+        self.lj3 = other.lj3
+        self.lj4 = other.lj4
+        self.rc_sq = other.rc_sq
+        self.energy_shift = other.energy_shift
+
+    fn __moveinit__(out self, owned other: LJParams):
+        self.lj1 = other.lj1
+        self.lj2 = other.lj2
+        self.lj3 = other.lj3
+        self.lj4 = other.lj4
+        self.rc_sq = other.rc_sq
+        self.energy_shift = other.energy_shift
+
     fn __init__(out self, epsilon: Float64, sigma: Float64, rc: Float64):
         var sig6 = sigma ** 6
         var sig12 = sig6 * sig6
@@ -135,5 +151,5 @@ struct PairLJ(PairStyle):
 
         var total: Float64 = 0.0
         for e in energies:
-            total += e[]
+            total += e
         return total * 0.5  # correct for double-counting

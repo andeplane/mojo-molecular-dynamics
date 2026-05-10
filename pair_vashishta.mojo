@@ -1,5 +1,5 @@
 from algorithm import parallelize
-from math import sqrt, exp, pow
+from math import sqrt, exp
 from atom import Atoms
 from neighbor import NeighborList
 from pair_style import PairStyle
@@ -53,6 +53,26 @@ struct VashishtaParam:
     var dvrc: Float64      # -dV2/dr evaluated at rc
     var c0: Float64        # rc · dvrc − V2(rc)  (energy shift constant)
 
+    fn __copyinit__(out self, other: VashishtaParam):
+        self.bigh=other.bigh; self.eta=other.eta; self.zi=other.zi; self.zj=other.zj
+        self.lambda1=other.lambda1; self.bigd=other.bigd; self.lambda4=other.lambda4
+        self.bigw=other.bigw; self.cut=other.cut; self.bigb=other.bigb
+        self.gamma=other.gamma; self.r0=other.r0; self.bigc=other.bigc
+        self.costheta=other.costheta; self.heta=other.heta; self.zizj=other.zizj
+        self.lam1inv=other.lam1inv; self.mbigd=other.mbigd; self.lam4inv=other.lam4inv
+        self.big2b=other.big2b; self.big6w=other.big6w; self.cutsq=other.cutsq
+        self.cutsq2=other.cutsq2; self.dvrc=other.dvrc; self.c0=other.c0
+
+    fn __moveinit__(out self, owned other: VashishtaParam):
+        self.bigh=other.bigh; self.eta=other.eta; self.zi=other.zi; self.zj=other.zj
+        self.lambda1=other.lambda1; self.bigd=other.bigd; self.lambda4=other.lambda4
+        self.bigw=other.bigw; self.cut=other.cut; self.bigb=other.bigb
+        self.gamma=other.gamma; self.r0=other.r0; self.bigc=other.bigc
+        self.costheta=other.costheta; self.heta=other.heta; self.zizj=other.zizj
+        self.lam1inv=other.lam1inv; self.mbigd=other.mbigd; self.lam4inv=other.lam4inv
+        self.big2b=other.big2b; self.big6w=other.big6w; self.cutsq=other.cutsq
+        self.cutsq2=other.cutsq2; self.dvrc=other.dvrc; self.c0=other.c0
+
     fn __init__(
         out self,
         bigh: Float64, eta: Float64,
@@ -86,7 +106,7 @@ struct VashishtaParam:
         var rc2inv = rcinv * rcinv
         var rc4inv = rc2inv * rc2inv
         var rc6inv = rc2inv * rc4inv
-        var rceta  = pow(rcinv, eta)
+        var rceta  = rcinv ** eta
         var lam1rc = cut * self.lam1inv
         var lam4rc = cut * self.lam4inv
         var vrcc2  = self.zizj * rcinv * exp(-lam1rc)
@@ -120,7 +140,7 @@ fn _twobody(param: VashishtaParam, rsq: Float64) -> TwobodyResult:
     var rinvsq = 1.0 / rsq
     var r4inv  = rinvsq * rinvsq
     var r6inv  = rinvsq * r4inv
-    var reta   = pow(r, -param.eta)
+    var reta   = r ** (-param.eta)
     var lam1r  = r * param.lam1inv
     var lam4r  = r * param.lam4inv
     var vc2    = param.zizj * exp(-lam1r) / r
@@ -303,7 +323,7 @@ struct PairVashishta(PairStyle):
 
         var total_energy: Float64 = 0.0
         for e in energies_2b:
-            total_energy += e[] * 0.5  # halve for double-count
+            total_energy += e * 0.5  # halve for double-count
 
         # ----------------------------------------------------------------
         # Three-body pass — SERIAL, Newton's 3rd law, energy counted once
