@@ -73,19 +73,23 @@ fn _fcc_lattice(
                     idx += 1
 
 
-fn _py_float(obj: PythonObject) -> Float64:
-    """Convert a Python number to Float64."""
+fn _py_float(obj: PythonObject) raises -> Float64:
     return Float64(obj.__float__())
 
 
-fn _py_int(obj: PythonObject) -> Int:
-    """Convert a Python number to Int."""
+fn _py_int(obj: PythonObject) raises -> Int:
     return Int(obj.__int__())
 
 
-fn _py_str(obj: PythonObject) -> String:
-    """Convert a Python string to Mojo String."""
+fn _py_str(obj: PythonObject) raises -> String:
     return String(obj.__str__())
+
+
+fn _find_type_id(type_names: List[String], name: String) raises -> Int:
+    for k in range(len(type_names)):
+        if type_names[k] == name:
+            return k
+    raise Error("Unknown atom type: " + name)
 
 
 fn load_input(path: String) raises -> SimInput:
@@ -127,12 +131,6 @@ fn load_input(path: String) raises -> SimInput:
         type_names.append(_py_str(type_list[ti]["name"]))
         type_masses.append(_py_float(type_list[ti]["mass"]))
 
-    fn type_index(name: String) raises -> Int:
-        for k in range(len(type_names)):
-            if type_names[k] == name:
-                return k
-        raise Error("Unknown atom type: " + name)
-
     # --- Atoms: from lattice or explicit list ---
     var atoms: Atoms
     var has_atoms = builtins.bool(data.__contains__("atoms")).__bool__()
@@ -145,7 +143,7 @@ fn load_input(path: String) raises -> SimInput:
         for i in range(n):
             var a = atom_list[i]
             var tname = _py_str(a["type"])
-            var tid = type_index(tname)
+            var tid = _find_type_id(type_names, tname)
             atoms.x[3 * i]     = _py_float(a["x"])
             atoms.x[3 * i + 1] = _py_float(a["y"])
             atoms.x[3 * i + 2] = _py_float(a["z"])
@@ -162,7 +160,7 @@ fn load_input(path: String) raises -> SimInput:
         var ny_ = _py_int(lat["ny"])
         var nz_ = _py_int(lat["nz"])
         var at_name = _py_str(lat["atom_type"])
-        var at_id   = type_index(at_name)
+        var at_id   = _find_type_id(type_names, at_name)
         var n = nx_ * ny_ * nz_ * 4
         atoms = Atoms(n, lx, ly, lz)
         _fcc_lattice(atoms, a, nx_, ny_, nz_, at_id, type_masses[at_id])
@@ -176,7 +174,8 @@ fn load_input(path: String) raises -> SimInput:
         var vel_type = _py_str(vel["type"])
         if vel_type == "maxwell_boltzmann":
             var temp = _py_float(vel["temperature"])
-            var seed = _py_int(vel["seed"]) if builtins.bool(vel.__contains__("seed")).__bool__() else 42
+            var has_seed = builtins.bool(vel.__contains__("seed")).__bool__()
+            var seed = _py_int(vel["seed"]) if has_seed else 42
             init_velocities_mb(atoms, temp, seed)
         else:
             raise Error("Unknown velocity type: " + vel_type)
@@ -192,8 +191,8 @@ fn load_input(path: String) raises -> SimInput:
         var np = _py_int(builtins.len(lj_list))
         for pi in range(np):
             var p = lj_list[pi]
-            var t0 = type_index(_py_str(p["types"][0]))
-            var t1 = type_index(_py_str(p["types"][1]))
+            var t0 = _find_type_id(type_names, _py_str(p["types"][0]))
+            var t1 = _find_type_id(type_names, _py_str(p["types"][1]))
             lj_pair.set_pair(
                 t0, t1,
                 _py_float(p["epsilon"]),
@@ -205,9 +204,9 @@ fn load_input(path: String) raises -> SimInput:
         var nt = _py_int(builtins.len(trip_list))
         for ti in range(nt):
             var t = trip_list[ti]
-            var apex_id = type_index(_py_str(t["apex"]))
-            var j_id    = type_index(_py_str(t["j"]))
-            var k_id    = type_index(_py_str(t["k"]))
+            var apex_id = _find_type_id(type_names, _py_str(t["apex"]))
+            var j_id    = _find_type_id(type_names, _py_str(t["j"]))
+            var k_id    = _find_type_id(type_names, _py_str(t["k"]))
             var param = VashishtaParam(
                 bigh=_py_float(t["H"]),
                 eta=_py_float(t["eta"]),
