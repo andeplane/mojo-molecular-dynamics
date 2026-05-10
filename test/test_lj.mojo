@@ -75,8 +75,10 @@ fn test_lj_equilibrium_energy() raises:
 
     atoms.zero_forces()
     var energy = pair.compute(atoms, nlist)
-    # Full list halves energy; unshifted V_min = -epsilon
-    assert_almost_equal(energy, -EPS - pair.params[0].energy_shift, atol=1e-8)
+    # Full list halves energy; unshifted V_min = -epsilon. The energy_shift is
+    # stored at offset 5 of each (itype,jtype) entry in the flat params list.
+    var p_eshift = pair.params[5]  # (itype=0, jtype=0), field = _LJ_ESHIFT
+    assert_almost_equal(energy, -EPS - p_eshift, atol=1e-8)
 
 
 fn test_lj_repulsion_close() raises:
@@ -125,11 +127,14 @@ fn test_lj_energy_full_list_factor() raises:
     atoms.zero_forces()
     var energy = pair.compute(atoms, nlist)
 
-    # Hand-compute expected energy
-    var p = pair.params[0]
+    # Hand-compute expected energy from the flat params layout (6 floats per
+    # type pair: lj1, lj2, lj3, lj4, rc_sq, energy_shift).
+    var lj3    = pair.params[2]
+    var lj4    = pair.params[3]
+    var eshift = pair.params[5]
     var r2inv = 1.0 / (r * r)
     var r6inv = r2inv * r2inv * r2inv
-    var expected = r6inv * (p.lj3 * r6inv - p.lj4) - p.energy_shift
+    var expected = r6inv * (lj3 * r6inv - lj4) - eshift
     assert_almost_equal(energy, expected, rtol=1e-10)
 
 

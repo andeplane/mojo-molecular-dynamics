@@ -2,7 +2,7 @@ from std.python import Python, PythonObject
 from mojo_md.atom import Atoms
 from mojo_md.integrator import VelocityVerlet
 from mojo_md.pair_lj import PairLJ
-from mojo_md.pair_vashishta import PairVashishta, VashishtaParam
+from mojo_md.pair_vashishta import PairVashishta, VashishtaParam, make_vashishta_param
 from mojo_md.random_utils import init_velocities_mb
 from mojo_md.simulation import Simulation
 
@@ -213,7 +213,7 @@ fn _run_vashishta(data: PythonObject) raises:
         var apex_id = _find_type_id(type_names, _py_str(t["apex"]))
         var j_id    = _find_type_id(type_names, _py_str(t["j"]))
         var k_id    = _find_type_id(type_names, _py_str(t["k"]))
-        var param = VashishtaParam(
+        var param = make_vashishta_param(
             bigh=_py_float(t["H"]),
             eta=_py_float(t["eta"]),
             zi=_py_float(t["zi"]),

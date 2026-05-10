@@ -1,4 +1,6 @@
+from std.gpu.host import DeviceContext, DeviceBuffer
 from std.math import sqrt
+from mojo_md.neighbor import NeighborList
 
 
 struct Atoms(Movable):
@@ -123,3 +125,229 @@ fn wrap_into_box(mut atoms: Atoms):
             if pos >= l:
                 pos -= l
             atoms.x[ix + d] = pos
+
+
+# ---------------------------------------------------------------------------
+# GPU mirror of Atoms — same SoA layout, lives in DeviceBuffer instead of List.
+# Created from `Atoms.upload(ctx)` and refreshed at every neighbor-list rebuild.
+# Per-step kernels never touch the CPU side; only positions are round-tripped
+# at rebuild_interval steps so the CPU can rebuild ghosts and the neighbor list.
+# ---------------------------------------------------------------------------
+
+struct GPUAtoms(Movable):
+    """GPU-resident mirror of Atoms (DeviceBuffer SoA)."""
+    var nlocal: Int
+    var nghost: Int
+    var nmax: Int
+    var x:        DeviceBuffer[DType.float64]   # 3*nmax
+    var v:        DeviceBuffer[DType.float64]   # 3*nlocal
+    var f:        DeviceBuffer[DType.float64]   # 3*nmax  (ghosts accumulate, then folded back by reverse_comm)
+    var pe_atom:  DeviceBuffer[DType.float64]   # nlocal — per-atom PE accumulator (no atomics needed; summed on host)
+    var mass:     DeviceBuffer[DType.float64]   # nmax
+    var type_id:  DeviceBuffer[DType.int32]     # nmax
+    var tag:      DeviceBuffer[DType.int32]     # nmax
+    var box:      DeviceBuffer[DType.float64]   # 3
+
+    fn __init__(
+        out self,
+        nlocal: Int, nghost: Int, nmax: Int,
+        var x: DeviceBuffer[DType.float64],
+        var v: DeviceBuffer[DType.float64],
+        var f: DeviceBuffer[DType.float64],
+        var pe_atom: DeviceBuffer[DType.float64],
+        var mass: DeviceBuffer[DType.float64],
+        var type_id: DeviceBuffer[DType.int32],
+        var tag: DeviceBuffer[DType.int32],
+        var box: DeviceBuffer[DType.float64],
+    ):
+        self.nlocal = nlocal;  self.nghost = nghost;  self.nmax = nmax
+        self.x = x^;  self.v = v^;  self.f = f^;  self.pe_atom = pe_atom^
+        self.mass = mass^;  self.type_id = type_id^;  self.tag = tag^;  self.box = box^
+
+    fn n(self) -> Int:
+        return self.nlocal + self.nghost
+
+    @staticmethod
+    fn from_cpu(read atoms: Atoms, ctx: DeviceContext) raises -> GPUAtoms:
+        """Allocate device buffers and upload all per-atom arrays."""
+        var nlocal = atoms.nlocal
+        var nghost = atoms.nghost
+        var nmax   = atoms.nmax
+
+        var x_dev    = ctx.enqueue_create_buffer[DType.float64](3 * nmax)
+        var v_dev    = ctx.enqueue_create_buffer[DType.float64](3 * nlocal)
+        var f_dev    = ctx.enqueue_create_buffer[DType.float64](3 * nmax)
+        var pe_dev   = ctx.enqueue_create_buffer[DType.float64](nlocal)
+        var mass_dev = ctx.enqueue_create_buffer[DType.float64](nmax)
+        var tid_dev  = ctx.enqueue_create_buffer[DType.int32](nmax)
+        var tag_dev  = ctx.enqueue_create_buffer[DType.int32](nmax)
+        var box_dev  = ctx.enqueue_create_buffer[DType.float64](3)
+
+        # Host staging buffers
+        var h_x    = ctx.enqueue_create_host_buffer[DType.float64](3 * nmax)
+        var h_v    = ctx.enqueue_create_host_buffer[DType.float64](3 * nlocal)
+        var h_f    = ctx.enqueue_create_host_buffer[DType.float64](3 * nmax)
+        var h_mass = ctx.enqueue_create_host_buffer[DType.float64](nmax)
+        var h_tid  = ctx.enqueue_create_host_buffer[DType.int32](nmax)
+        var h_tag  = ctx.enqueue_create_host_buffer[DType.int32](nmax)
+        var h_box  = ctx.enqueue_create_host_buffer[DType.float64](3)
+
+        for i in range(3 * nmax):
+            h_x[i] = atoms.x[i]
+            h_f[i] = atoms.f[i]
+        for i in range(3 * nlocal):
+            h_v[i] = atoms.v[i]
+        for i in range(nmax):
+            h_mass[i] = atoms.mass[i]
+            h_tid[i]  = Int32(atoms.type_id[i])
+            h_tag[i]  = Int32(atoms.tag[i])
+        h_box[0] = atoms.box[0]; h_box[1] = atoms.box[1]; h_box[2] = atoms.box[2]
+
+        ctx.enqueue_copy(x_dev,    h_x)
+        ctx.enqueue_copy(v_dev,    h_v)
+        ctx.enqueue_copy(f_dev,    h_f)
+        ctx.enqueue_copy(mass_dev, h_mass)
+        ctx.enqueue_copy(tid_dev,  h_tid)
+        ctx.enqueue_copy(tag_dev,  h_tag)
+        ctx.enqueue_copy(box_dev,  h_box)
+        ctx.synchronize()
+
+        return GPUAtoms(
+            nlocal, nghost, nmax,
+            x_dev^, v_dev^, f_dev^, pe_dev^, mass_dev^, tid_dev^, tag_dev^, box_dev^,
+        )
+
+    fn refresh_from_cpu(mut self, read atoms: Atoms, ctx: DeviceContext) raises:
+        """After a CPU-side ghost+nlist rebuild, re-upload x, type_id, tag."""
+        self.nlocal = atoms.nlocal
+        self.nghost = atoms.nghost
+        self.nmax   = atoms.nmax
+
+        var h_x   = ctx.enqueue_create_host_buffer[DType.float64](3 * self.nmax)
+        var h_tid = ctx.enqueue_create_host_buffer[DType.int32](self.nmax)
+        var h_tag = ctx.enqueue_create_host_buffer[DType.int32](self.nmax)
+
+        for i in range(3 * self.nmax):
+            h_x[i] = atoms.x[i]
+        for i in range(self.nmax):
+            h_tid[i] = Int32(atoms.type_id[i])
+            h_tag[i] = Int32(atoms.tag[i])
+
+        ctx.enqueue_copy(self.x,       h_x)
+        ctx.enqueue_copy(self.type_id, h_tid)
+        ctx.enqueue_copy(self.tag,     h_tag)
+        ctx.synchronize()
+
+    fn read_positions_to_cpu(read self, mut atoms: Atoms, ctx: DeviceContext) raises:
+        """GPU→CPU: copy real-atom positions for CPU-side neighbor-list rebuild."""
+        var h_x = ctx.enqueue_create_host_buffer[DType.float64](3 * self.nlocal)
+        ctx.enqueue_copy(h_x, self.x)
+        ctx.synchronize()
+        for i in range(3 * self.nlocal):
+            atoms.x[i] = h_x[i]
+
+    fn read_pe_to_cpu(read self, ctx: DeviceContext) raises -> Float64:
+        """GPU→CPU: read per-atom PE buffer and sum on host (avoids GPU atomics)."""
+        var h_pe = ctx.enqueue_create_host_buffer[DType.float64](self.nlocal)
+        ctx.enqueue_copy(h_pe, self.pe_atom)
+        ctx.synchronize()
+        var total: Float64 = 0.0
+        for i in range(self.nlocal):
+            total += h_pe[i]
+        return total
+
+    fn read_ke_to_cpu(read self, ctx: DeviceContext) raises -> Float64:
+        """GPU→CPU: copy v and mass, compute KE on host."""
+        var nlocal = self.nlocal
+        var h_v    = ctx.enqueue_create_host_buffer[DType.float64](3 * nlocal)
+        var h_mass = ctx.enqueue_create_host_buffer[DType.float64](nlocal)
+        ctx.enqueue_copy(h_v,    self.v)
+        ctx.enqueue_copy(h_mass, self.mass)
+        ctx.synchronize()
+        var ke: Float64 = 0.0
+        for i in range(nlocal):
+            var vx = h_v[3 * i]; var vy = h_v[3 * i + 1]; var vz = h_v[3 * i + 2]
+            ke += 0.5 * h_mass[i] * (vx*vx + vy*vy + vz*vz)
+        return ke
+
+
+struct GPUNeighborList(Movable):
+    """GPU-resident CSR neighbor list. Built on CPU each rebuild_interval, uploaded here."""
+    var nlocal: Int
+    var offsets:         DeviceBuffer[DType.int32]
+    var neighbors:       DeviceBuffer[DType.int32]
+    var short_offsets:   DeviceBuffer[DType.int32]
+    var short_neighbors: DeviceBuffer[DType.int32]
+
+    fn __init__(
+        out self,
+        nlocal: Int,
+        var offsets: DeviceBuffer[DType.int32],
+        var neighbors: DeviceBuffer[DType.int32],
+        var short_offsets: DeviceBuffer[DType.int32],
+        var short_neighbors: DeviceBuffer[DType.int32],
+    ):
+        self.nlocal = nlocal
+        self.offsets = offsets^
+        self.neighbors = neighbors^
+        self.short_offsets = short_offsets^
+        self.short_neighbors = short_neighbors^
+
+    @staticmethod
+    fn from_cpu(read nlist: NeighborList, ctx: DeviceContext) raises -> GPUNeighborList:
+        var nlocal = nlist.nlocal
+        var n_off  = nlocal + 1
+        var n_nb   = max(len(nlist.neighbors), 1)
+        var n_snb  = max(len(nlist.short_neighbors), 1)
+
+        var off_dev  = ctx.enqueue_create_buffer[DType.int32](n_off)
+        var nb_dev   = ctx.enqueue_create_buffer[DType.int32](n_nb)
+        var soff_dev = ctx.enqueue_create_buffer[DType.int32](n_off)
+        var snb_dev  = ctx.enqueue_create_buffer[DType.int32](n_snb)
+
+        var h_off  = ctx.enqueue_create_host_buffer[DType.int32](n_off)
+        var h_nb   = ctx.enqueue_create_host_buffer[DType.int32](n_nb)
+        var h_soff = ctx.enqueue_create_host_buffer[DType.int32](n_off)
+        var h_snb  = ctx.enqueue_create_host_buffer[DType.int32](n_snb)
+
+        for i in range(n_off):
+            h_off[i]  = Int32(nlist.offsets[i])
+            h_soff[i] = Int32(nlist.short_offsets[i])
+        for i in range(len(nlist.neighbors)):
+            h_nb[i] = Int32(nlist.neighbors[i])
+        for i in range(len(nlist.short_neighbors)):
+            h_snb[i] = Int32(nlist.short_neighbors[i])
+
+        ctx.enqueue_copy(off_dev,  h_off)
+        ctx.enqueue_copy(nb_dev,   h_nb)
+        ctx.enqueue_copy(soff_dev, h_soff)
+        ctx.enqueue_copy(snb_dev,  h_snb)
+        ctx.synchronize()
+
+        return GPUNeighborList(nlocal, off_dev^, nb_dev^, soff_dev^, snb_dev^)
+
+    fn refresh_from_cpu(mut self, read nlist: NeighborList, ctx: DeviceContext) raises:
+        """Re-upload after each CPU-side rebuild."""
+        var nlocal = nlist.nlocal
+        var n_off  = nlocal + 1
+        var n_nb   = max(len(nlist.neighbors), 1)
+        var n_snb  = max(len(nlist.short_neighbors), 1)
+        self.nlocal = nlocal
+
+        var h_off  = ctx.enqueue_create_host_buffer[DType.int32](n_off)
+        var h_nb   = ctx.enqueue_create_host_buffer[DType.int32](n_nb)
+        var h_soff = ctx.enqueue_create_host_buffer[DType.int32](n_off)
+        var h_snb  = ctx.enqueue_create_host_buffer[DType.int32](n_snb)
+        for i in range(n_off):
+            h_off[i]  = Int32(nlist.offsets[i])
+            h_soff[i] = Int32(nlist.short_offsets[i])
+        for i in range(len(nlist.neighbors)):
+            h_nb[i] = Int32(nlist.neighbors[i])
+        for i in range(len(nlist.short_neighbors)):
+            h_snb[i] = Int32(nlist.short_neighbors[i])
+
+        ctx.enqueue_copy(self.offsets,         h_off)
+        ctx.enqueue_copy(self.neighbors,       h_nb)
+        ctx.enqueue_copy(self.short_offsets,   h_soff)
+        ctx.enqueue_copy(self.short_neighbors, h_snb)
+        ctx.synchronize()

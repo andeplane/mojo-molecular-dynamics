@@ -1,3 +1,4 @@
+from std.algorithm import parallelize
 from mojo_md.atom import Atoms, wrap_into_box
 
 
@@ -72,22 +73,29 @@ struct GhostBuilder(Movable):
         """
         Accumulate forces from ghost atoms back onto their source real atoms.
 
-        For PBC on a single process, the source atom is identified by matching
-        tag (global ID). This O(N_ghost * N_local) scan is cheap for typical
-        ghost counts; a production MPI version replaces this with a reverse
-        halo exchange.
+        Owner-computes: each local atom i scans all ghosts and sums those
+        whose tag matches i's tag. Each thread writes only to f[i] — no
+        atomics, no race conditions, parallel on CPU and GPU.
+
+        For PBC on a single process the source atom is identified by matching
+        tag (global ID). For typical ghost counts the O(N_local * N_ghost) scan
+        is cheap; a production MPI version replaces this with a reverse halo
+        exchange.
         """
-        for g in range(atoms.nlocal, atoms.n()):
-            var g_tag = atoms.tag[g]
-            var fx = atoms.f[3 * g]
-            var fy = atoms.f[3 * g + 1]
-            var fz = atoms.f[3 * g + 2]
-            if fx == 0.0 and fy == 0.0 and fz == 0.0:
-                continue
-            # Find source local atom with matching tag
-            for i in range(atoms.nlocal):
-                if atoms.tag[i] == g_tag:
-                    atoms.f[3 * i] += fx
-                    atoms.f[3 * i + 1] += fy
-                    atoms.f[3 * i + 2] += fz
-                    break
+        var nlocal = atoms.nlocal
+        var ntotal = atoms.n()
+
+        @parameter
+        fn fold_into(i: Int):
+            var i_tag = atoms.tag[i]
+            var fx: Float64 = 0.0;  var fy: Float64 = 0.0;  var fz: Float64 = 0.0
+            for g in range(nlocal, ntotal):
+                if atoms.tag[g] == i_tag:
+                    fx += atoms.f[3 * g]
+                    fy += atoms.f[3 * g + 1]
+                    fz += atoms.f[3 * g + 2]
+            atoms.f[3 * i]     += fx
+            atoms.f[3 * i + 1] += fy
+            atoms.f[3 * i + 2] += fz
+
+        parallelize[fold_into](nlocal)

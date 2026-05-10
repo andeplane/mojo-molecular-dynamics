@@ -1,10 +1,10 @@
 from std.math import sqrt
 from std.testing import assert_almost_equal, assert_true
-from mojo_md.pair_vashishta import VashishtaParam, _twobody, _threebody, QQR2E
+from mojo_md.pair_vashishta import VashishtaParam, make_vashishta_param, _twobody, _threebody, QQR2E
 
 
 # Si-O Vashishta parameters (from LAMMPS SiO.1990.vashishta, Si-O-O entry)
-comptime P_SiO = VashishtaParam(
+comptime P_SiO = make_vashishta_param(
     bigh=188.0, eta=9.0, zi=1.6, zj=-0.8,
     lambda1=10.0, bigd=1.245, lambda4=4.43,
     bigw=22.1179, cut=5.5,
@@ -13,7 +13,7 @@ comptime P_SiO = VashishtaParam(
 )
 
 # Si-Si-Si entry (mostly zero, for testing edge cases)
-comptime P_SiSi = VashishtaParam(
+comptime P_SiSi = make_vashishta_param(
     bigh=0.82023, eta=11.0, zi=1.6, zj=1.6,
     lambda1=999.0, bigd=0.0, lambda4=999.0,
     bigw=0.0, cut=5.0,
