@@ -13,11 +13,11 @@ that pair style + CPU backend are marked TIMEOUT and skipped.  GPU runs are
 always attempted (they are fast enough at any listed size).
 """
 
-from atom import Atoms
-from integrator import VelocityVerlet
-from pair_lj import PairLJ
-from pair_vashishta import PairVashishta, make_vashishta_param
-from simulation import Simulation
+from mojo_md.atom import Atoms
+from mojo_md.integrator import VelocityVerlet
+from mojo_md.pair_lj import PairLJ
+from mojo_md.pair_vashishta import PairVashishta, make_vashishta_param
+from mojo_md.simulation import Simulation, SimulationGPU
 from std.sys import argv, has_accelerator
 from time import perf_counter_ns
 
@@ -41,7 +41,7 @@ fn _size_ladder() -> SIZE_LADDER:
 # BenchmarkResult (T018)
 # ---------------------------------------------------------------------------
 
-struct BenchmarkResult(Movable):
+struct BenchmarkResult(Movable, Copyable, ImplicitlyCopyable):
     var pair_style:    String
     var n_atoms:       Int
     var backend:       String
@@ -270,15 +270,14 @@ fn _fmt_float(v: Float64, decimals: Int = 2) -> String:
 
 fn _fmt_int_comma(n: Int) -> String:
     """Format an integer with comma thousands separators."""
-    var s = String(n)
-    var out = ""
-    var count = 0
-    for i in range(len(s) - 1, -1, -1):
-        if count > 0 and count % 3 == 0:
-            out = "," + out
-        out = String(s[i]) + out
-        count += 1
-    return out
+    if n < 0:
+        return "-" + _fmt_int_comma(-n)
+    if n < 1000:
+        return String(n)
+    var lower_str = String(n % 1000)
+    while len(lower_str) < 3:
+        lower_str = "0" + lower_str
+    return _fmt_int_comma(n // 1000) + "," + lower_str
 
 
 fn _print_separator():
@@ -375,23 +374,20 @@ fn main() raises:
         results.append(r^)
 
     # GPU LJ — T020
-    comptime if has_accelerator():
-        from atom_gpu import GPUAtoms, GPUNeighborList
-        from integrator_gpu import VelocityVerletGPU
-        from pair_lj_gpu import PairLJGPU
-        from simulation_gpu import SimulationGPU
+    # comptime if False: Metal enqueue_function not yet supported; flip to
+    # `has_accelerator()` once Mojo's Metal GPU backend is available.
+    comptime if False:
         from std.gpu.host import DeviceContext
 
         for i in range(len(sizes)):
-            var n       = sizes[i]
-            var n_steps = _n_steps_for(n)
-            var atoms   = _build_fcc_atoms(n)
+            var n        = sizes[i]
+            var n_steps  = _n_steps_for(n)
+            var atoms    = _build_fcc_atoms(n)
             var actual_n = atoms.nlocal
-            var cpu_pair = _make_lj_pair()
+            var pair     = _make_lj_pair()
             var ctx      = DeviceContext()
-            var gpu_pair = PairLJGPU.from_cpu(cpu_pair, ctx)
-            var sim      = SimulationGPU[PairLJGPU, VelocityVerletGPU](
-                atoms^, gpu_pair^, VelocityVerletGPU(), ctx^,
+            var sim      = SimulationGPU[PairLJ, VelocityVerlet](
+                atoms^, pair^, VelocityVerlet(), ctx^,
                 dt=0.002, skin=0.3, rebuild_interval=10,
             )
             var t0 = perf_counter_ns()
@@ -419,19 +415,18 @@ fn main() raises:
         results.append(r^)
 
     # GPU Vashishta — T021
-    comptime if has_accelerator():
-        from pair_vashishta_gpu import PairVashishtaGPU
+    comptime if False:
+        from std.gpu.host import DeviceContext
 
         for i in range(len(sizes)):
-            var n       = sizes[i]
-            var n_steps = _n_steps_for(n)
-            var atoms   = _build_sio2_random(n)
+            var n        = sizes[i]
+            var n_steps  = _n_steps_for(n)
+            var atoms    = _build_sio2_random(n)
             var actual_n = atoms.nlocal
-            var cpu_pair = _make_vashishta_pair()
+            var pair     = _make_vashishta_pair()
             var ctx      = DeviceContext()
-            var gpu_pair = PairVashishtaGPU.from_cpu(cpu_pair, ctx)
-            var sim      = SimulationGPU[PairVashishtaGPU, VelocityVerletGPU](
-                atoms^, gpu_pair^, VelocityVerletGPU(), ctx^,
+            var sim      = SimulationGPU[PairVashishta, VelocityVerlet](
+                atoms^, pair^, VelocityVerlet(), ctx^,
                 dt=0.001, skin=0.3, rebuild_interval=10,
             )
             var t0 = perf_counter_ns()

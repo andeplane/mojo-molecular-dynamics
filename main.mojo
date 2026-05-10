@@ -138,10 +138,10 @@ fn demo_sio2():
 
 fn demo_argon_gpu() raises:
     """108 Ar atoms on FCC lattice, LJ potential — GPU path."""
-    # comptime if False: Mojo 0.26.2 Metal backend crashes on any GPU kernel.
-    # Switch to `comptime if has_accelerator()` on NVIDIA CUDA hardware.
+    # comptime if False: Mojo Metal backend does not yet support enqueue_function.
+    # Flip to `comptime if has_accelerator():` once the Metal compiler bug is fixed.
     comptime if False:
-        print("=== Demo: Argon (Lennard-Jones) [GPU] ===")
+        print("=== Demo: Argon (Lennard-Jones) [MPS GPU] ===")
         var atoms = _build_argon_atoms()
         var pair  = _make_lj_pair()
         init_velocities_mb(atoms, 0.0081)
@@ -153,13 +153,13 @@ fn demo_argon_gpu() raises:
         sim.run(1000, print_interval=100)
         print("Argon GPU demo complete.")
     else:
-        print("[mojo-md] GPU demos require NVIDIA CUDA (Mojo 0.26.2 Metal unsupported).")
+        print("[mojo-md] MPS GPU demos are not yet available: Mojo's Metal enqueue_function backend is under development.")
 
 
 fn demo_sio2_gpu() raises:
     """9-atom SiO₂ cluster, Vashishta potential — GPU path."""
     comptime if False:
-        print("=== Demo: SiO₂ (Vashishta) [GPU] ===")
+        print("=== Demo: SiO₂ (Vashishta) [MPS GPU] ===")
         var atoms = _build_sio2_atoms()
         var pair  = _make_vashishta_pair()
         init_velocities_mb(atoms, 0.01)
@@ -171,7 +171,7 @@ fn demo_sio2_gpu() raises:
         sim.run(200, print_interval=50)
         print("SiO₂ GPU demo complete.")
     else:
-        print("[mojo-md] GPU demos require NVIDIA CUDA (Mojo 0.26.2 Metal unsupported).")
+        print("[mojo-md] MPS GPU demos are not yet available: Mojo's Metal enqueue_function backend is under development.")
 
 
 # ---------------------------------------------------------------------------

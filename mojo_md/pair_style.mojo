@@ -26,16 +26,16 @@ trait PairStyle(Movable, ImplicitlyDestructible):
         """Cutoff for 3-body short neighbor list (0 if not needed)."""
         ...
 
-    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float64]:
-        """Upload the pair's flat params buffer to device memory. Caller owns the result."""
+    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float32]:
+        """Upload the pair's flat params buffer to device memory as Float32. Caller owns the result."""
         ...
 
     fn compute_gpu(
         self,
         mut atoms: GPUAtoms,
         read nlist: GPUNeighborList,
-        read params_dev: DeviceBuffer[DType.float64],
+        read params_dev: DeviceBuffer[DType.float32],
         ctx: DeviceContext,
     ) raises -> Float64:
-        """GPU twin of compute(). Same algorithm — same kernel body."""
+        """GPU twin of compute(). Float32 kernels for Metal/MPS compatibility."""
         ...

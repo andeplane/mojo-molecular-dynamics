@@ -135,30 +135,31 @@ fn wrap_into_box(mut atoms: Atoms):
 # ---------------------------------------------------------------------------
 
 struct GPUAtoms(Movable):
-    """GPU-resident mirror of Atoms (DeviceBuffer SoA)."""
+    """GPU-resident mirror of Atoms (DeviceBuffer SoA, Float32 for Metal/MPS compatibility).
+    CPU uses Float64; casts happen at upload/download boundaries."""
     var nlocal: Int
     var nghost: Int
     var nmax: Int
-    var x:        DeviceBuffer[DType.float64]   # 3*nmax
-    var v:        DeviceBuffer[DType.float64]   # 3*nlocal
-    var f:        DeviceBuffer[DType.float64]   # 3*nmax  (ghosts accumulate, then folded back by reverse_comm)
-    var pe_atom:  DeviceBuffer[DType.float64]   # nlocal — per-atom PE accumulator (no atomics needed; summed on host)
-    var mass:     DeviceBuffer[DType.float64]   # nmax
+    var x:        DeviceBuffer[DType.float32]   # 3*nmax
+    var v:        DeviceBuffer[DType.float32]   # 3*nlocal
+    var f:        DeviceBuffer[DType.float32]   # 3*nmax
+    var pe_atom:  DeviceBuffer[DType.float32]   # nlocal
+    var mass:     DeviceBuffer[DType.float32]   # nmax
     var type_id:  DeviceBuffer[DType.int32]     # nmax
     var tag:      DeviceBuffer[DType.int32]     # nmax
-    var box:      DeviceBuffer[DType.float64]   # 3
+    var box:      DeviceBuffer[DType.float32]   # 3
 
     fn __init__(
         out self,
         nlocal: Int, nghost: Int, nmax: Int,
-        var x: DeviceBuffer[DType.float64],
-        var v: DeviceBuffer[DType.float64],
-        var f: DeviceBuffer[DType.float64],
-        var pe_atom: DeviceBuffer[DType.float64],
-        var mass: DeviceBuffer[DType.float64],
+        var x: DeviceBuffer[DType.float32],
+        var v: DeviceBuffer[DType.float32],
+        var f: DeviceBuffer[DType.float32],
+        var pe_atom: DeviceBuffer[DType.float32],
+        var mass: DeviceBuffer[DType.float32],
         var type_id: DeviceBuffer[DType.int32],
         var tag: DeviceBuffer[DType.int32],
-        var box: DeviceBuffer[DType.float64],
+        var box: DeviceBuffer[DType.float32],
     ):
         self.nlocal = nlocal;  self.nghost = nghost;  self.nmax = nmax
         self.x = x^;  self.v = v^;  self.f = f^;  self.pe_atom = pe_atom^
@@ -169,39 +170,40 @@ struct GPUAtoms(Movable):
 
     @staticmethod
     fn from_cpu(read atoms: Atoms, ctx: DeviceContext) raises -> GPUAtoms:
-        """Allocate device buffers and upload all per-atom arrays."""
+        """Allocate Float32 device buffers and upload all per-atom arrays (Float64→Float32)."""
         var nlocal = atoms.nlocal
         var nghost = atoms.nghost
         var nmax   = atoms.nmax
 
-        var x_dev    = ctx.enqueue_create_buffer[DType.float64](3 * nmax)
-        var v_dev    = ctx.enqueue_create_buffer[DType.float64](3 * nlocal)
-        var f_dev    = ctx.enqueue_create_buffer[DType.float64](3 * nmax)
-        var pe_dev   = ctx.enqueue_create_buffer[DType.float64](nlocal)
-        var mass_dev = ctx.enqueue_create_buffer[DType.float64](nmax)
+        var x_dev    = ctx.enqueue_create_buffer[DType.float32](3 * nmax)
+        var v_dev    = ctx.enqueue_create_buffer[DType.float32](3 * nlocal)
+        var f_dev    = ctx.enqueue_create_buffer[DType.float32](3 * nmax)
+        var pe_dev   = ctx.enqueue_create_buffer[DType.float32](nlocal)
+        var mass_dev = ctx.enqueue_create_buffer[DType.float32](nmax)
         var tid_dev  = ctx.enqueue_create_buffer[DType.int32](nmax)
         var tag_dev  = ctx.enqueue_create_buffer[DType.int32](nmax)
-        var box_dev  = ctx.enqueue_create_buffer[DType.float64](3)
+        var box_dev  = ctx.enqueue_create_buffer[DType.float32](3)
 
-        # Host staging buffers
-        var h_x    = ctx.enqueue_create_host_buffer[DType.float64](3 * nmax)
-        var h_v    = ctx.enqueue_create_host_buffer[DType.float64](3 * nlocal)
-        var h_f    = ctx.enqueue_create_host_buffer[DType.float64](3 * nmax)
-        var h_mass = ctx.enqueue_create_host_buffer[DType.float64](nmax)
+        var h_x    = ctx.enqueue_create_host_buffer[DType.float32](3 * nmax)
+        var h_v    = ctx.enqueue_create_host_buffer[DType.float32](3 * nlocal)
+        var h_f    = ctx.enqueue_create_host_buffer[DType.float32](3 * nmax)
+        var h_mass = ctx.enqueue_create_host_buffer[DType.float32](nmax)
         var h_tid  = ctx.enqueue_create_host_buffer[DType.int32](nmax)
         var h_tag  = ctx.enqueue_create_host_buffer[DType.int32](nmax)
-        var h_box  = ctx.enqueue_create_host_buffer[DType.float64](3)
+        var h_box  = ctx.enqueue_create_host_buffer[DType.float32](3)
 
         for i in range(3 * nmax):
-            h_x[i] = atoms.x[i]
-            h_f[i] = atoms.f[i]
+            h_x[i] = Float32(atoms.x[i])
+            h_f[i] = Float32(atoms.f[i])
         for i in range(3 * nlocal):
-            h_v[i] = atoms.v[i]
+            h_v[i] = Float32(atoms.v[i])
         for i in range(nmax):
-            h_mass[i] = atoms.mass[i]
+            h_mass[i] = Float32(atoms.mass[i])
             h_tid[i]  = Int32(atoms.type_id[i])
             h_tag[i]  = Int32(atoms.tag[i])
-        h_box[0] = atoms.box[0]; h_box[1] = atoms.box[1]; h_box[2] = atoms.box[2]
+        h_box[0] = Float32(atoms.box[0])
+        h_box[1] = Float32(atoms.box[1])
+        h_box[2] = Float32(atoms.box[2])
 
         ctx.enqueue_copy(x_dev,    h_x)
         ctx.enqueue_copy(v_dev,    h_v)
@@ -218,17 +220,17 @@ struct GPUAtoms(Movable):
         )
 
     fn refresh_from_cpu(mut self, read atoms: Atoms, ctx: DeviceContext) raises:
-        """After a CPU-side ghost+nlist rebuild, re-upload x, type_id, tag."""
+        """After a CPU-side ghost+nlist rebuild, re-upload x, type_id, tag (Float64→Float32)."""
         self.nlocal = atoms.nlocal
         self.nghost = atoms.nghost
         self.nmax   = atoms.nmax
 
-        var h_x   = ctx.enqueue_create_host_buffer[DType.float64](3 * self.nmax)
+        var h_x   = ctx.enqueue_create_host_buffer[DType.float32](3 * self.nmax)
         var h_tid = ctx.enqueue_create_host_buffer[DType.int32](self.nmax)
         var h_tag = ctx.enqueue_create_host_buffer[DType.int32](self.nmax)
 
         for i in range(3 * self.nmax):
-            h_x[i] = atoms.x[i]
+            h_x[i] = Float32(atoms.x[i])
         for i in range(self.nmax):
             h_tid[i] = Int32(atoms.type_id[i])
             h_tag[i] = Int32(atoms.tag[i])
@@ -239,35 +241,37 @@ struct GPUAtoms(Movable):
         ctx.synchronize()
 
     fn read_positions_to_cpu(read self, mut atoms: Atoms, ctx: DeviceContext) raises:
-        """GPU→CPU: copy real-atom positions for CPU-side neighbor-list rebuild."""
-        var h_x = ctx.enqueue_create_host_buffer[DType.float64](3 * self.nlocal)
+        """GPU→CPU: copy real-atom positions (Float32→Float64) for CPU neighbor-list rebuild."""
+        var h_x = ctx.enqueue_create_host_buffer[DType.float32](3 * self.nlocal)
         ctx.enqueue_copy(h_x, self.x)
         ctx.synchronize()
         for i in range(3 * self.nlocal):
-            atoms.x[i] = h_x[i]
+            atoms.x[i] = Float64(h_x[i])
 
     fn read_pe_to_cpu(read self, ctx: DeviceContext) raises -> Float64:
-        """GPU→CPU: read per-atom PE buffer and sum on host (avoids GPU atomics)."""
-        var h_pe = ctx.enqueue_create_host_buffer[DType.float64](self.nlocal)
+        """GPU→CPU: read per-atom PE (Float32), sum on host as Float64."""
+        var h_pe = ctx.enqueue_create_host_buffer[DType.float32](self.nlocal)
         ctx.enqueue_copy(h_pe, self.pe_atom)
         ctx.synchronize()
         var total: Float64 = 0.0
         for i in range(self.nlocal):
-            total += h_pe[i]
+            total += Float64(h_pe[i])
         return total
 
     fn read_ke_to_cpu(read self, ctx: DeviceContext) raises -> Float64:
-        """GPU→CPU: copy v and mass, compute KE on host."""
+        """GPU→CPU: copy v and mass (Float32), compute KE on host as Float64."""
         var nlocal = self.nlocal
-        var h_v    = ctx.enqueue_create_host_buffer[DType.float64](3 * nlocal)
-        var h_mass = ctx.enqueue_create_host_buffer[DType.float64](nlocal)
+        var h_v    = ctx.enqueue_create_host_buffer[DType.float32](3 * nlocal)
+        var h_mass = ctx.enqueue_create_host_buffer[DType.float32](nlocal)
         ctx.enqueue_copy(h_v,    self.v)
         ctx.enqueue_copy(h_mass, self.mass)
         ctx.synchronize()
         var ke: Float64 = 0.0
         for i in range(nlocal):
-            var vx = h_v[3 * i]; var vy = h_v[3 * i + 1]; var vz = h_v[3 * i + 2]
-            ke += 0.5 * h_mass[i] * (vx*vx + vy*vy + vz*vz)
+            var vx = Float64(h_v[3 * i])
+            var vy = Float64(h_v[3 * i + 1])
+            var vz = Float64(h_v[3 * i + 2])
+            ke += 0.5 * Float64(h_mass[i]) * (vx*vx + vy*vy + vz*vz)
         return ke
 
 

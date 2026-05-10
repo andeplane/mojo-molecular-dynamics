@@ -41,29 +41,34 @@ fn _full_step_x_body(
     x_ptr[3 * i + 2] += dt * v_ptr[3 * i + 2]
 
 
-# GPU kernels — thin wrappers that compute the thread index and call the body.
+# GPU kernels — Float32 (Metal/MPS compatibility). CPU bodies above stay Float64.
 
 fn _half_step_v_kernel(
-    v_ptr:    UnsafePointer[Float64, MutAnyOrigin],
-    f_ptr:    UnsafePointer[Float64, MutAnyOrigin],
-    mass_ptr: UnsafePointer[Float64, MutAnyOrigin],
-    half_dt:  Float64,
+    v_ptr:    UnsafePointer[Float32, MutAnyOrigin],
+    f_ptr:    UnsafePointer[Float32, MutAnyOrigin],
+    mass_ptr: UnsafePointer[Float32, MutAnyOrigin],
+    half_dt:  Float32,
     nlocal:   Int,
 ):
     var i = Int(global_idx.x)
     if i < nlocal:
-        _half_step_v_body(i, v_ptr, f_ptr, mass_ptr, half_dt)
+        var inv_m = Float32(1.0) / mass_ptr[i]
+        v_ptr[3 * i]     += half_dt * f_ptr[3 * i]     * inv_m
+        v_ptr[3 * i + 1] += half_dt * f_ptr[3 * i + 1] * inv_m
+        v_ptr[3 * i + 2] += half_dt * f_ptr[3 * i + 2] * inv_m
 
 
 fn _full_step_x_kernel(
-    x_ptr:  UnsafePointer[Float64, MutAnyOrigin],
-    v_ptr:  UnsafePointer[Float64, MutAnyOrigin],
-    dt:     Float64,
+    x_ptr:  UnsafePointer[Float32, MutAnyOrigin],
+    v_ptr:  UnsafePointer[Float32, MutAnyOrigin],
+    dt:     Float32,
     nlocal: Int,
 ):
     var i = Int(global_idx.x)
     if i < nlocal:
-        _full_step_x_body(i, x_ptr, v_ptr, dt)
+        x_ptr[3 * i]     += dt * v_ptr[3 * i]
+        x_ptr[3 * i + 1] += dt * v_ptr[3 * i + 1]
+        x_ptr[3 * i + 2] += dt * v_ptr[3 * i + 2]
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +129,7 @@ struct VelocityVerlet(Integrator):
             atoms.v.unsafe_ptr(),
             atoms.f.unsafe_ptr(),
             atoms.mass.unsafe_ptr(),
-            0.5 * dt,
+            Float32(0.5 * dt),
             nlocal,
             grid_dim  = n_blocks,
             block_dim = _BLOCK_SIZE,
@@ -136,7 +141,7 @@ struct VelocityVerlet(Integrator):
         ctx.enqueue_function[_full_step_x_kernel, _full_step_x_kernel](
             atoms.x.unsafe_ptr(),
             atoms.v.unsafe_ptr(),
-            dt,
+            Float32(dt),
             nlocal,
             grid_dim  = n_blocks,
             block_dim = _BLOCK_SIZE,

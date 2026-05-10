@@ -1,7 +1,7 @@
 from std.algorithm import parallelize
 from std.gpu import global_idx
 from std.gpu.host import DeviceContext, DeviceBuffer
-from std.math import sqrt, exp, ceildiv
+from std.math import sqrt, exp, log, ceildiv
 from mojo_md.atom import Atoms, GPUAtoms, GPUNeighborList
 from mojo_md.neighbor import NeighborList
 from mojo_md.pair_style import PairStyle
@@ -168,6 +168,15 @@ struct TwobodyResult(ImplicitlyCopyable, Movable):
     var energy: Float64
 
     fn __init__(out self, fforce: Float64, energy: Float64):
+        self.fforce = fforce
+        self.energy = energy
+
+
+struct TwobodyResultF32(ImplicitlyCopyable, Movable):
+    var fforce: Float32
+    var energy: Float32
+
+    fn __init__(out self, fforce: Float32, energy: Float32):
         self.fforce = fforce
         self.energy = energy
 
@@ -447,40 +456,258 @@ fn _vashishta_3body_body(
     pe_ptr[m] += em
 
 
-# GPU wrappers — compute thread index and dispatch into the shared body.
+# ---------------------------------------------------------------------------
+# GPU kernels — Float32 (Metal/MPS). Same physics as the CPU bodies above,
+# but all floats are Float32. Parameters are read directly from the Float32
+# device buffer without going through VashishtaParam (which has Float64 fields).
+# ---------------------------------------------------------------------------
+
+@always_inline
+fn _twobody_f32(
+    heta: Float32, zizj: Float32, mbigd: Float32, big6w: Float32,
+    bigw: Float32, dvrc: Float32, c0: Float32, lam1inv: Float32,
+    lam4inv: Float32, eta: Float32, bigh: Float32, rsq: Float32,
+) -> TwobodyResultF32:
+    var r      = sqrt(rsq)
+    var rinvsq = Float32(1.0) / rsq
+    var r4inv  = rinvsq * rinvsq
+    var r6inv  = rinvsq * r4inv
+    var reta   = exp(-eta * log(r))   # r^{-eta}, Float32-safe
+    var lam1r  = r * lam1inv;  var lam4r = r * lam4inv
+    var vc2    = zizj * exp(-lam1r) / r
+    var vc3    = mbigd * r4inv * exp(-lam4r)
+    var fforce = (dvrc * r - (Float32(4.0) * vc3 + lam4r * vc3 + big6w * r6inv
+                  - heta * reta - vc2 - lam1r * vc2)) * rinvsq
+    var eng    = bigh * reta + vc2 - vc3 - bigw * r6inv - r * dvrc + c0
+    return TwobodyResultF32(fforce, eng)
+
 
 fn _vashishta_2body_kernel(
-    x_ptr:       UnsafePointer[Float64, MutAnyOrigin],
-    f_ptr:       UnsafePointer[Float64, MutAnyOrigin],
-    pe_ptr:      UnsafePointer[Float64, MutAnyOrigin],
+    x_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    f_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    pe_ptr:      UnsafePointer[Float32, MutAnyOrigin],
     type_id_ptr: UnsafePointer[Int32,   MutAnyOrigin],
-    p_ptr:       UnsafePointer[Float64, MutAnyOrigin],
+    p_ptr:       UnsafePointer[Float32, MutAnyOrigin],
     off_ptr:     UnsafePointer[Int32,   MutAnyOrigin],
     nb_ptr:      UnsafePointer[Int32,   MutAnyOrigin],
     n_types:     Int,
     nlocal:      Int,
 ):
     var i = Int(global_idx.x)
-    if i < nlocal:
-        _vashishta_2body_body(i, x_ptr, f_ptr, pe_ptr, type_id_ptr,
-                              p_ptr, off_ptr, nb_ptr, n_types)
+    if i >= nlocal:
+        return
+    var xi = x_ptr[3 * i]; var yi = x_ptr[3 * i + 1]; var zi = x_ptr[3 * i + 2]
+    var itype = Int(type_id_ptr[i])
+    var fxi: Float32 = 0.0; var fyi: Float32 = 0.0; var fzi: Float32 = 0.0
+    var ei:  Float32 = 0.0
+    var start = Int(off_ptr[i]); var end = Int(off_ptr[i + 1])
+    for nb in range(start, end):
+        var j = Int(nb_ptr[nb])
+        var jtype = Int(type_id_ptr[j])
+        var off_ij = ((itype * n_types + jtype) * n_types + jtype) * _VS
+        var cutsq = p_ptr[off_ij + _VS_CUTSQ]
+        var dx = xi - x_ptr[3 * j]; var dy = yi - x_ptr[3 * j + 1]; var dz = zi - x_ptr[3 * j + 2]
+        var rsq = dx * dx + dy * dy + dz * dz
+        if rsq >= cutsq:
+            continue
+        var res = _twobody_f32(
+            p_ptr[off_ij + _VS_HETA],   p_ptr[off_ij + _VS_ZIZJ],
+            p_ptr[off_ij + _VS_MBIGD],  p_ptr[off_ij + _VS_BIG6W],
+            p_ptr[off_ij + _VS_BIGW],   p_ptr[off_ij + _VS_DVRC],
+            p_ptr[off_ij + _VS_C0],     p_ptr[off_ij + _VS_LAM1INV],
+            p_ptr[off_ij + _VS_LAM4INV], p_ptr[off_ij + _VS_ETA],
+            p_ptr[off_ij + _VS_BIGH],   rsq,
+        )
+        fxi += dx * res.fforce; fyi += dy * res.fforce; fzi += dz * res.fforce
+        ei  += res.energy
+    f_ptr[3 * i] += fxi; f_ptr[3 * i + 1] += fyi; f_ptr[3 * i + 2] += fzi
+    pe_ptr[i] = ei * Float32(0.5)
 
 
 fn _vashishta_3body_kernel(
-    x_ptr:        UnsafePointer[Float64, MutAnyOrigin],
-    f_ptr:        UnsafePointer[Float64, MutAnyOrigin],
-    pe_ptr:       UnsafePointer[Float64, MutAnyOrigin],
+    x_ptr:        UnsafePointer[Float32, MutAnyOrigin],
+    f_ptr:        UnsafePointer[Float32, MutAnyOrigin],
+    pe_ptr:       UnsafePointer[Float32, MutAnyOrigin],
     type_id_ptr:  UnsafePointer[Int32,   MutAnyOrigin],
-    p_ptr:        UnsafePointer[Float64, MutAnyOrigin],
+    p_ptr:        UnsafePointer[Float32, MutAnyOrigin],
     soff_ptr:     UnsafePointer[Int32,   MutAnyOrigin],
     snb_ptr:      UnsafePointer[Int32,   MutAnyOrigin],
     n_types:      Int,
     nlocal:       Int,
 ):
     var m = Int(global_idx.x)
-    if m < nlocal:
-        _vashishta_3body_body(m, nlocal, x_ptr, f_ptr, pe_ptr, type_id_ptr,
-                              p_ptr, soff_ptr, snb_ptr, n_types)
+    if m >= nlocal:
+        return
+    var xm = x_ptr[3 * m]; var ym = x_ptr[3 * m + 1]; var zm = x_ptr[3 * m + 2]
+    var mtype = Int(type_id_ptr[m])
+    var fxm: Float32 = 0.0;  var fym: Float32 = 0.0;  var fzm: Float32 = 0.0
+    var em:  Float32 = 0.0
+    var ss_m = Int(soff_ptr[m]); var se_m = Int(soff_ptr[m + 1])
+    var nshort_m = se_m - ss_m
+
+    # ---- Case A: m is the apex ----
+    for jj in range(nshort_m):
+        var j = Int(snb_ptr[ss_m + jj])
+        var jtype = Int(type_id_ptr[j])
+        var off_mj = ((mtype * n_types + jtype) * n_types + jtype) * _VS
+        var d1x = x_ptr[3 * j]     - xm
+        var d1y = x_ptr[3 * j + 1] - ym
+        var d1z = x_ptr[3 * j + 2] - zm
+        var rsq1 = d1x * d1x + d1y * d1y + d1z * d1z
+        if rsq1 >= p_ptr[off_mj + _VS_CUTSQ2]:
+            continue
+        var r1      = sqrt(rsq1)
+        var rainv1  = Float32(1.0) / (r1 - p_ptr[off_mj + _VS_R0])
+        var gsrainv1 = p_ptr[off_mj + _VS_GAMMA] * rainv1
+        var gsrainvsq1 = gsrainv1 * rainv1 / r1
+        var expg1   = exp(gsrainv1)
+        for kk in range(jj + 1, nshort_m):
+            var k = Int(snb_ptr[ss_m + kk])
+            var ktype = Int(type_id_ptr[k])
+            var off_mk = ((mtype * n_types + ktype) * n_types + ktype) * _VS
+            var d2x = x_ptr[3 * k]     - xm
+            var d2y = x_ptr[3 * k + 1] - ym
+            var d2z = x_ptr[3 * k + 2] - zm
+            var rsq2 = d2x * d2x + d2y * d2y + d2z * d2z
+            if rsq2 >= p_ptr[off_mk + _VS_CUTSQ2]:
+                continue
+            var r2       = sqrt(rsq2)
+            var rainv2   = Float32(1.0) / (r2 - p_ptr[off_mk + _VS_R0])
+            var gsrainv2 = p_ptr[off_mk + _VS_GAMMA] * rainv2
+            var gsrainvsq2 = gsrainv2 * rainv2 / r2
+            var expg2    = exp(gsrainv2)
+            var off_mjk  = ((mtype * n_types + jtype) * n_types + ktype) * _VS
+            var bigb     = p_ptr[off_mjk + _VS_BIGB]
+            var big2b    = p_ptr[off_mjk + _VS_BIG2B]
+            var bigc     = p_ptr[off_mjk + _VS_BIGC]
+            var costh    = p_ptr[off_mjk + _VS_COSTH]
+            var rinv12   = Float32(1.0) / (r1 * r2)
+            var cs       = (d1x * d2x + d1y * d2y + d1z * d2z) * rinv12
+            var delcs    = cs - costh
+            var delcssq  = delcs * delcs
+            var pcsinv   = bigc * delcssq + Float32(1.0)
+            var pcsinvsq = pcsinv * pcsinv
+            var pcs      = delcssq / pcsinv
+            var facexp   = expg1 * expg2
+            var facrad   = bigb * facexp * pcs
+            var frad1    = facrad * gsrainvsq1
+            var frad2    = facrad * gsrainvsq2
+            var facang   = big2b * facexp * delcs / pcsinvsq
+            var facang12 = rinv12 * facang
+            var csfacang = cs * facang
+            var csfac1   = (Float32(1.0) / rsq1) * csfacang
+            var csfac2   = (Float32(1.0) / rsq2) * csfacang
+            fxm -= d1x * (frad1 + csfac1) - d2x * facang12
+            fym -= d1y * (frad1 + csfac1) - d2y * facang12
+            fzm -= d1z * (frad1 + csfac1) - d2z * facang12
+            fxm -= d2x * (frad2 + csfac2) - d1x * facang12
+            fym -= d2y * (frad2 + csfac2) - d1y * facang12
+            fzm -= d2z * (frad2 + csfac2) - d1z * facang12
+            em  += facrad
+
+    # ---- Case B: m is a side atom of a triplet centered at A ----
+    for ii in range(nshort_m):
+        var A = Int(snb_ptr[ss_m + ii])
+        if A >= nlocal:
+            continue
+        var Atype = Int(type_id_ptr[A])
+        var ss_A  = Int(soff_ptr[A]); var se_A = Int(soff_ptr[A + 1])
+        var nshort_A = se_A - ss_A
+        var pos_m = -1
+        for nn in range(nshort_A):
+            if Int(snb_ptr[ss_A + nn]) == m:
+                pos_m = nn
+                break
+        if pos_m < 0:
+            continue
+        var xA = x_ptr[3 * A]; var yA = x_ptr[3 * A + 1]; var zA = x_ptr[3 * A + 2]
+        var d_Am_x = xm - xA;  var d_Am_y = ym - yA;  var d_Am_z = zm - zA
+        var rsq_Am = d_Am_x * d_Am_x + d_Am_y * d_Am_y + d_Am_z * d_Am_z
+        var off_Am = ((Atype * n_types + mtype) * n_types + mtype) * _VS
+        if rsq_Am >= p_ptr[off_Am + _VS_CUTSQ2]:
+            continue
+        var r_Am     = sqrt(rsq_Am)
+        var rainv_Am = Float32(1.0) / (r_Am - p_ptr[off_Am + _VS_R0])
+        var gsrainv_Am = p_ptr[off_Am + _VS_GAMMA] * rainv_Am
+        var gsrainvsq_Am = gsrainv_Am * rainv_Am / r_Am
+        var expg_Am  = exp(gsrainv_Am)
+
+        # B < pos_m → m is "k" in triplet (A, B, m)
+        for nn in range(pos_m):
+            var B = Int(snb_ptr[ss_A + nn])
+            var Btype = Int(type_id_ptr[B])
+            var off_AB = ((Atype * n_types + Btype) * n_types + Btype) * _VS
+            var d_AB_x = x_ptr[3 * B]     - xA
+            var d_AB_y = x_ptr[3 * B + 1] - yA
+            var d_AB_z = x_ptr[3 * B + 2] - zA
+            var rsq_AB = d_AB_x * d_AB_x + d_AB_y * d_AB_y + d_AB_z * d_AB_z
+            if rsq_AB >= p_ptr[off_AB + _VS_CUTSQ2]:
+                continue
+            var r_AB     = sqrt(rsq_AB)
+            var rainv_AB = Float32(1.0) / (r_AB - p_ptr[off_AB + _VS_R0])
+            var gsrainv_AB = p_ptr[off_AB + _VS_GAMMA] * rainv_AB
+            var gsrainvsq_AB = gsrainv_AB * rainv_AB / r_AB
+            var expg_AB  = exp(gsrainv_AB)
+            var off_ABm  = ((Atype * n_types + Btype) * n_types + mtype) * _VS
+            var bigb     = p_ptr[off_ABm + _VS_BIGB]
+            var big2b    = p_ptr[off_ABm + _VS_BIG2B]
+            var bigc     = p_ptr[off_ABm + _VS_BIGC]
+            var costh    = p_ptr[off_ABm + _VS_COSTH]
+            var rinv12   = Float32(1.0) / (r_AB * r_Am)
+            var cs       = (d_AB_x * d_Am_x + d_AB_y * d_Am_y + d_AB_z * d_Am_z) * rinv12
+            var delcs    = cs - costh;  var delcssq = delcs * delcs
+            var pcsinv   = bigc * delcssq + Float32(1.0); var pcsinvsq = pcsinv * pcsinv
+            var pcs      = delcssq / pcsinv
+            var facexp   = expg_AB * expg_Am
+            var facrad   = bigb * facexp * pcs
+            var frad2    = facrad * gsrainvsq_Am
+            var facang   = big2b * facexp * delcs / pcsinvsq
+            var facang12 = rinv12 * facang
+            var csfacang = cs * facang
+            var csfac2   = (Float32(1.0) / rsq_Am) * csfacang
+            fxm += d_Am_x * (frad2 + csfac2) - d_AB_x * facang12
+            fym += d_Am_y * (frad2 + csfac2) - d_AB_y * facang12
+            fzm += d_Am_z * (frad2 + csfac2) - d_AB_z * facang12
+
+        # C > pos_m → m is "j" in triplet (A, m, C)
+        for nn in range(pos_m + 1, nshort_A):
+            var C = Int(snb_ptr[ss_A + nn])
+            var Ctype = Int(type_id_ptr[C])
+            var off_AC = ((Atype * n_types + Ctype) * n_types + Ctype) * _VS
+            var d_AC_x = x_ptr[3 * C]     - xA
+            var d_AC_y = x_ptr[3 * C + 1] - yA
+            var d_AC_z = x_ptr[3 * C + 2] - zA
+            var rsq_AC = d_AC_x * d_AC_x + d_AC_y * d_AC_y + d_AC_z * d_AC_z
+            if rsq_AC >= p_ptr[off_AC + _VS_CUTSQ2]:
+                continue
+            var r_AC     = sqrt(rsq_AC)
+            var rainv_AC = Float32(1.0) / (r_AC - p_ptr[off_AC + _VS_R0])
+            var gsrainv_AC = p_ptr[off_AC + _VS_GAMMA] * rainv_AC
+            var gsrainvsq_AC = gsrainv_AC * rainv_AC / r_AC
+            var expg_AC  = exp(gsrainv_AC)
+            var off_AmC  = ((Atype * n_types + mtype) * n_types + Ctype) * _VS
+            var bigb     = p_ptr[off_AmC + _VS_BIGB]
+            var big2b    = p_ptr[off_AmC + _VS_BIG2B]
+            var bigc     = p_ptr[off_AmC + _VS_BIGC]
+            var costh    = p_ptr[off_AmC + _VS_COSTH]
+            var rinv12   = Float32(1.0) / (r_Am * r_AC)
+            var cs       = (d_Am_x * d_AC_x + d_Am_y * d_AC_y + d_Am_z * d_AC_z) * rinv12
+            var delcs    = cs - costh;  var delcssq = delcs * delcs
+            var pcsinv   = bigc * delcssq + Float32(1.0); var pcsinvsq = pcsinv * pcsinv
+            var pcs      = delcssq / pcsinv
+            var facexp   = expg_Am * expg_AC
+            var facrad   = bigb * facexp * pcs
+            var frad1    = facrad * gsrainvsq_Am
+            var facang   = big2b * facexp * delcs / pcsinvsq
+            var facang12 = rinv12 * facang
+            var csfacang = cs * facang
+            var csfac1   = (Float32(1.0) / rsq_Am) * csfacang
+            fxm += d_Am_x * (frad1 + csfac1) - d_AC_x * facang12
+            fym += d_Am_y * (frad1 + csfac1) - d_AC_y * facang12
+            fzm += d_Am_z * (frad1 + csfac1) - d_AC_z * facang12
+
+    f_ptr[3 * m] += fxm; f_ptr[3 * m + 1] += fym; f_ptr[3 * m + 2] += fzm
+    pe_ptr[m] += em
 
 
 # ---------------------------------------------------------------------------
@@ -607,12 +834,12 @@ struct PairVashishta(PairStyle):
         return total
 
     # ---- GPU dispatch ----
-    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float64]:
+    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float32]:
         var n_floats = self.n_types * self.n_types * self.n_types * _VS
-        var dev  = ctx.enqueue_create_buffer[DType.float64](n_floats)
-        var host = ctx.enqueue_create_host_buffer[DType.float64](n_floats)
+        var dev  = ctx.enqueue_create_buffer[DType.float32](n_floats)
+        var host = ctx.enqueue_create_host_buffer[DType.float32](n_floats)
         for i in range(n_floats):
-            host[i] = self.params[i]
+            host[i] = Float32(self.params[i])
         ctx.enqueue_copy(dev, host)
         ctx.synchronize()
         return dev^
@@ -621,7 +848,7 @@ struct PairVashishta(PairStyle):
         self,
         mut atoms: GPUAtoms,
         read nlist: GPUNeighborList,
-        read params_dev: DeviceBuffer[DType.float64],
+        read params_dev: DeviceBuffer[DType.float32],
         ctx: DeviceContext,
     ) raises -> Float64:
         var nlocal = atoms.nlocal

@@ -17,48 +17,33 @@ comptime _BLOCK_SIZE: Int = 256
 # fold ghost forces back) are written once.
 # ---------------------------------------------------------------------------
 
-@always_inline
-fn _zero_forces_body(idx: Int, f_ptr: UnsafePointer[Float64, MutAnyOrigin]):
-    f_ptr[idx] = 0.0
+# CPU kernel bodies (Float64) — used by Simulation via Atoms.zero_forces / GhostBuilder.reverse_comm.
 
+# GPU kernels — Float32 for Metal/MPS compatibility.
 
-fn _zero_forces_kernel(f_ptr: UnsafePointer[Float64, MutAnyOrigin], n: Int):
+fn _zero_forces_kernel(f_ptr: UnsafePointer[Float32, MutAnyOrigin], n: Int):
     var i = Int(global_idx.x)
     if i < n:
-        _zero_forces_body(i, f_ptr)
-
-
-@always_inline
-fn _reverse_comm_body(
-    i:           Int,
-    nlocal:      Int,
-    ntotal:      Int,
-    f_ptr:       UnsafePointer[Float64, MutAnyOrigin],
-    tag_ptr:     UnsafePointer[Int32,   MutAnyOrigin],
-):
-    """Owner-computes ghost reduction. Thread for local atom i scans all
-    ghosts and folds matching-tag ghost forces into f[i]. No atomics."""
-    var i_tag = tag_ptr[i]
-    var fx: Float64 = 0.0;  var fy: Float64 = 0.0;  var fz: Float64 = 0.0
-    for g in range(nlocal, ntotal):
-        if tag_ptr[g] == i_tag:
-            fx += f_ptr[3 * g]
-            fy += f_ptr[3 * g + 1]
-            fz += f_ptr[3 * g + 2]
-    f_ptr[3 * i]     += fx
-    f_ptr[3 * i + 1] += fy
-    f_ptr[3 * i + 2] += fz
+        f_ptr[i] = 0.0
 
 
 fn _reverse_comm_kernel(
-    f_ptr:   UnsafePointer[Float64, MutAnyOrigin],
+    f_ptr:   UnsafePointer[Float32, MutAnyOrigin],
     tag_ptr: UnsafePointer[Int32,   MutAnyOrigin],
     nlocal:  Int,
     ntotal:  Int,
 ):
     var i = Int(global_idx.x)
-    if i < nlocal:
-        _reverse_comm_body(i, nlocal, ntotal, f_ptr, tag_ptr)
+    if i >= nlocal:
+        return
+    var i_tag = tag_ptr[i]
+    var fx: Float32 = 0.0;  var fy: Float32 = 0.0;  var fz: Float32 = 0.0
+    for g in range(nlocal, ntotal):
+        if tag_ptr[g] == i_tag:
+            fx += f_ptr[3 * g]; fy += f_ptr[3 * g + 1]; fz += f_ptr[3 * g + 2]
+    f_ptr[3 * i]     += fx
+    f_ptr[3 * i + 1] += fy
+    f_ptr[3 * i + 2] += fz
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +160,7 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
     var atoms:            GPUAtoms                       # device-side state
     var nlist:            GPUNeighborList
     var pair:             Self.P
-    var pair_params_dev:  DeviceBuffer[DType.float64]    # GPU mirror of pair params
+    var pair_params_dev:  DeviceBuffer[DType.float32]    # GPU mirror of pair params (Float32 for Metal/MPS)
     var integrator:       Self.I
     var ctx:              DeviceContext
     var dt:               Float64

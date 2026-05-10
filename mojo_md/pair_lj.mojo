@@ -103,25 +103,43 @@ fn _lj_force_body(
     pe_ptr[i] = ei  # owner-computes — no atomic, summed on host afterwards
 
 
-# Thin GPU wrapper around the body. Same pointers as the CPU dispatcher gives.
+# GPU kernel — Float32 (Metal/MPS). Same algorithm as _lj_force_body above (Float64 CPU).
 fn _lj_force_kernel(
-    x_ptr:       UnsafePointer[Float64, MutAnyOrigin],
-    f_ptr:       UnsafePointer[Float64, MutAnyOrigin],
-    pe_ptr:      UnsafePointer[Float64, MutAnyOrigin],
+    x_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    f_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    pe_ptr:      UnsafePointer[Float32, MutAnyOrigin],
     type_id_ptr: UnsafePointer[Int32,   MutAnyOrigin],
-    p_ptr:       UnsafePointer[Float64, MutAnyOrigin],
+    p_ptr:       UnsafePointer[Float32, MutAnyOrigin],
     off_ptr:     UnsafePointer[Int32,   MutAnyOrigin],
     nb_ptr:      UnsafePointer[Int32,   MutAnyOrigin],
     n_types:     Int,
     nlocal:      Int,
 ):
     var i = Int(global_idx.x)
-    if i < nlocal:
-        _lj_force_body(
-            i, x_ptr, f_ptr, pe_ptr,
-            type_id_ptr, p_ptr, off_ptr, nb_ptr,
-            n_types,
-        )
+    if i >= nlocal:
+        return
+    var xi = x_ptr[3 * i]; var yi = x_ptr[3 * i + 1]; var zi = x_ptr[3 * i + 2]
+    var itype = Int(type_id_ptr[i])
+    var fxi: Float32 = 0.0; var fyi: Float32 = 0.0; var fzi: Float32 = 0.0
+    var ei:  Float32 = 0.0
+    var start = Int(off_ptr[i]); var end = Int(off_ptr[i + 1])
+    for nb in range(start, end):
+        var j = Int(nb_ptr[nb])
+        var jtype = Int(type_id_ptr[j])
+        var off = (n_types * itype + jtype) * _LJ_STRIDE
+        var lj1    = p_ptr[off + _LJ_LJ1];  var lj2    = p_ptr[off + _LJ_LJ2]
+        var lj3    = p_ptr[off + _LJ_LJ3];  var lj4    = p_ptr[off + _LJ_LJ4]
+        var rc_sq  = p_ptr[off + _LJ_RC_SQ]; var eshift = p_ptr[off + _LJ_ESHIFT]
+        var dx = xi - x_ptr[3 * j]; var dy = yi - x_ptr[3 * j + 1]; var dz = zi - x_ptr[3 * j + 2]
+        var rsq = dx * dx + dy * dy + dz * dz
+        if rsq < rc_sq:
+            var r2inv = Float32(1.0) / rsq
+            var r6inv = r2inv * r2inv * r2inv
+            var fpair = (lj1 * r6inv - lj2) * r6inv * r2inv
+            fxi += dx * fpair; fyi += dy * fpair; fzi += dz * fpair
+            ei  += r6inv * (lj3 * r6inv - lj4) - eshift
+    f_ptr[3 * i]     += fxi; f_ptr[3 * i + 1] += fyi; f_ptr[3 * i + 2] += fzi
+    pe_ptr[i] = ei
 
 
 # ---------------------------------------------------------------------------
@@ -213,13 +231,13 @@ struct PairLJ(PairStyle):
         return total * 0.5  # full list double-counts
 
     # ---- GPU dispatch ----
-    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float64]:
-        """Upload the flat params buffer to the device. Caller owns the result."""
+    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float32]:
+        """Upload the flat params buffer to the device as Float32. Caller owns the result."""
         var n_floats = self.n_types * self.n_types * _LJ_STRIDE
-        var dev  = ctx.enqueue_create_buffer[DType.float64](n_floats)
-        var host = ctx.enqueue_create_host_buffer[DType.float64](n_floats)
+        var dev  = ctx.enqueue_create_buffer[DType.float32](n_floats)
+        var host = ctx.enqueue_create_host_buffer[DType.float32](n_floats)
         for i in range(n_floats):
-            host[i] = self.params[i]
+            host[i] = Float32(self.params[i])
         ctx.enqueue_copy(dev, host)
         ctx.synchronize()
         return dev^
@@ -228,7 +246,7 @@ struct PairLJ(PairStyle):
         self,
         mut atoms: GPUAtoms,
         read nlist: GPUNeighborList,
-        read params_dev: DeviceBuffer[DType.float64],
+        read params_dev: DeviceBuffer[DType.float32],
         ctx: DeviceContext,
     ) raises -> Float64:
         var nlocal = atoms.nlocal
