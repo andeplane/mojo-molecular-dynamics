@@ -1,67 +1,148 @@
 from std.algorithm import parallelize
-from mojo_md.atom import Atoms
+from std.gpu import global_idx
+from std.gpu.host import DeviceContext
+from std.math import ceildiv
+from mojo_md.atom import Atoms, GPUAtoms
 
+comptime _BLOCK_SIZE: Int = 256
+
+
+# ---------------------------------------------------------------------------
+# Shared kernel bodies — used by BOTH the CPU `parallelize` path and the GPU
+# `enqueue_function` path. Owner-computes: each thread writes only to atom i,
+# no atomics, no race conditions, identical algorithm on either backend.
+# ---------------------------------------------------------------------------
+
+@always_inline
+fn _half_step_v_body(
+    i: Int,
+    v_ptr:    UnsafePointer[Float64, MutAnyOrigin],
+    f_ptr:    UnsafePointer[Float64, MutAnyOrigin],
+    mass_ptr: UnsafePointer[Float64, MutAnyOrigin],
+    half_dt:  Float64,
+):
+    """v[i] += 0.5 * dt * f[i] / mass[i]"""
+    var inv_m = 1.0 / mass_ptr[i]
+    v_ptr[3 * i]     += half_dt * f_ptr[3 * i]     * inv_m
+    v_ptr[3 * i + 1] += half_dt * f_ptr[3 * i + 1] * inv_m
+    v_ptr[3 * i + 2] += half_dt * f_ptr[3 * i + 2] * inv_m
+
+
+@always_inline
+fn _full_step_x_body(
+    i: Int,
+    x_ptr: UnsafePointer[Float64, MutAnyOrigin],
+    v_ptr: UnsafePointer[Float64, MutAnyOrigin],
+    dt:    Float64,
+):
+    """x[i] += dt * v[i]"""
+    x_ptr[3 * i]     += dt * v_ptr[3 * i]
+    x_ptr[3 * i + 1] += dt * v_ptr[3 * i + 1]
+    x_ptr[3 * i + 2] += dt * v_ptr[3 * i + 2]
+
+
+# GPU kernels — Float32 (Metal/MPS compatibility). CPU bodies above stay Float64.
+
+fn _half_step_v_kernel(
+    v_ptr:    UnsafePointer[Float32, MutAnyOrigin],
+    f_ptr:    UnsafePointer[Float32, MutAnyOrigin],
+    mass_ptr: UnsafePointer[Float32, MutAnyOrigin],
+    half_dt:  Float32,
+    nlocal:   Int,
+):
+    var i = Int(global_idx.x)
+    if i < nlocal:
+        var inv_m = Float32(1.0) / mass_ptr[i]
+        v_ptr[3 * i]     += half_dt * f_ptr[3 * i]     * inv_m
+        v_ptr[3 * i + 1] += half_dt * f_ptr[3 * i + 1] * inv_m
+        v_ptr[3 * i + 2] += half_dt * f_ptr[3 * i + 2] * inv_m
+
+
+fn _full_step_x_kernel(
+    x_ptr:  UnsafePointer[Float32, MutAnyOrigin],
+    v_ptr:  UnsafePointer[Float32, MutAnyOrigin],
+    dt:     Float32,
+    nlocal: Int,
+):
+    var i = Int(global_idx.x)
+    if i < nlocal:
+        x_ptr[3 * i]     += dt * v_ptr[3 * i]
+        x_ptr[3 * i + 1] += dt * v_ptr[3 * i + 1]
+        x_ptr[3 * i + 2] += dt * v_ptr[3 * i + 2]
+
+
+# ---------------------------------------------------------------------------
+# Integrator trait — both half-steps available on CPU and GPU.
+# ---------------------------------------------------------------------------
 
 trait Integrator(Movable, ImplicitlyDestructible):
-    """
-    Interface for time integrators.
+    """Time-integrator interface. Each method has a CPU and a GPU dispatcher
+    that share their kernel body, so the algorithm is written once."""
 
-    The velocity Verlet algorithm splits naturally into two half-steps around
-    the force evaluation. Implementations of both half-steps are parallelized
-    over local atoms since each atom's update is independent.
-    """
     fn half_step_v(mut self, mut atoms: Atoms, dt: Float64):
-        """
-        v[i] += 0.5 * dt * f[i] / mass[i]  for i in 0..nlocal.
-        Called both before and after force evaluation each timestep.
-        """
         ...
-
     fn full_step_x(mut self, mut atoms: Atoms, dt: Float64):
-        """
-        x[i] += dt * v[i]  for i in 0..nlocal.
-        Positions may drift outside the box; wrapping happens during ghost rebuild.
-        """
+        ...
+    fn half_step_v_gpu(mut self, mut atoms: GPUAtoms, ctx: DeviceContext, dt: Float64) raises:
+        ...
+    fn full_step_x_gpu(mut self, mut atoms: GPUAtoms, ctx: DeviceContext, dt: Float64) raises:
         ...
 
 
 struct VelocityVerlet(Integrator):
-    """
-    Standard velocity Verlet / leapfrog integrator (NVE ensemble).
-
-    Integration sequence per timestep:
-      1. half_step_v  — advance velocities by dt/2 using old forces
-      2. full_step_x  — advance positions by dt using new velocities
-      3. [ghost rebuild + neighbor list rebuild if needed]
-      4. [force evaluation: zeros f, calls pair.compute()]
-      5. half_step_v  — advance velocities by dt/2 using new forces
-
-    Energy conservation is second-order in dt.
-    """
+    """Standard velocity Verlet (NVE). One kernel body per half-step, dispatched
+    via parallelize on CPU and enqueue_function on GPU."""
 
     fn __init__(out self):
         pass
 
+    # ---- CPU dispatch ----
     fn half_step_v(mut self, mut atoms: Atoms, dt: Float64):
         var half_dt = 0.5 * dt
         var nlocal = atoms.nlocal
+        var v_ptr = atoms.v.unsafe_ptr()
+        var f_ptr = atoms.f.unsafe_ptr()
+        var mass_ptr = atoms.mass.unsafe_ptr()
 
         @parameter
-        fn update_v(i: Int):
-            var inv_m = 1.0 / atoms.mass[i]
-            atoms.v[3 * i]     += half_dt * atoms.f[3 * i]     * inv_m
-            atoms.v[3 * i + 1] += half_dt * atoms.f[3 * i + 1] * inv_m
-            atoms.v[3 * i + 2] += half_dt * atoms.f[3 * i + 2] * inv_m
+        fn body(i: Int):
+            _half_step_v_body(i, v_ptr, f_ptr, mass_ptr, half_dt)
 
-        parallelize[update_v](nlocal)
+        parallelize[body](nlocal)
 
     fn full_step_x(mut self, mut atoms: Atoms, dt: Float64):
         var nlocal = atoms.nlocal
+        var x_ptr = atoms.x.unsafe_ptr()
+        var v_ptr = atoms.v.unsafe_ptr()
 
         @parameter
-        fn update_x(i: Int):
-            atoms.x[3 * i]     += dt * atoms.v[3 * i]
-            atoms.x[3 * i + 1] += dt * atoms.v[3 * i + 1]
-            atoms.x[3 * i + 2] += dt * atoms.v[3 * i + 2]
+        fn body(i: Int):
+            _full_step_x_body(i, x_ptr, v_ptr, dt)
 
-        parallelize[update_x](nlocal)
+        parallelize[body](nlocal)
+
+    # ---- GPU dispatch ----
+    fn half_step_v_gpu(mut self, mut atoms: GPUAtoms, ctx: DeviceContext, dt: Float64) raises:
+        var nlocal = atoms.nlocal
+        var n_blocks = ceildiv(nlocal, _BLOCK_SIZE)
+        ctx.enqueue_function[_half_step_v_kernel, _half_step_v_kernel](
+            atoms.v.unsafe_ptr(),
+            atoms.f.unsafe_ptr(),
+            atoms.mass.unsafe_ptr(),
+            Float32(0.5 * dt),
+            nlocal,
+            grid_dim  = n_blocks,
+            block_dim = _BLOCK_SIZE,
+        )
+
+    fn full_step_x_gpu(mut self, mut atoms: GPUAtoms, ctx: DeviceContext, dt: Float64) raises:
+        var nlocal = atoms.nlocal
+        var n_blocks = ceildiv(nlocal, _BLOCK_SIZE)
+        ctx.enqueue_function[_full_step_x_kernel, _full_step_x_kernel](
+            atoms.x.unsafe_ptr(),
+            atoms.v.unsafe_ptr(),
+            Float32(dt),
+            nlocal,
+            grid_dim  = n_blocks,
+            block_dim = _BLOCK_SIZE,
+        )

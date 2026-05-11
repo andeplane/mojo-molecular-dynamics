@@ -26,6 +26,7 @@ struct GhostBuilder(Movable):
         """
         wrap_into_box(atoms)
         atoms.nghost = 0
+        atoms.ghost_source = List[Int]()
 
         var lx = atoms.box[0]
         var ly = atoms.box[1]
@@ -65,29 +66,16 @@ struct GhostBuilder(Movable):
         atoms.f[3 * g + 2] = 0.0
         atoms.mass[g] = atoms.mass[source]
         atoms.type_id[g] = atoms.type_id[source]
-        atoms.tag[g] = atoms.tag[source]  # same global ID as source
+        atoms.tag[g] = atoms.tag[source]
+        atoms.ghost_source.append(source)
         atoms.nghost += 1
 
     fn reverse_comm(mut self, mut atoms: Atoms):
-        """
-        Accumulate forces from ghost atoms back onto their source real atoms.
-
-        For PBC on a single process, the source atom is identified by matching
-        tag (global ID). This O(N_ghost * N_local) scan is cheap for typical
-        ghost counts; a production MPI version replaces this with a reverse
-        halo exchange.
-        """
-        for g in range(atoms.nlocal, atoms.n()):
-            var g_tag = atoms.tag[g]
-            var fx = atoms.f[3 * g]
-            var fy = atoms.f[3 * g + 1]
-            var fz = atoms.f[3 * g + 2]
-            if fx == 0.0 and fy == 0.0 and fz == 0.0:
-                continue
-            # Find source local atom with matching tag
-            for i in range(atoms.nlocal):
-                if atoms.tag[i] == g_tag:
-                    atoms.f[3 * i] += fx
-                    atoms.f[3 * i + 1] += fy
-                    atoms.f[3 * i + 2] += fz
-                    break
+        """Fold ghost forces back onto source real atoms. O(N_ghost)."""
+        var nlocal = atoms.nlocal
+        for g in range(atoms.nghost):
+            var src = atoms.ghost_source[g]
+            var gi = nlocal + g
+            atoms.f[3 * src]     += atoms.f[3 * gi]
+            atoms.f[3 * src + 1] += atoms.f[3 * gi + 1]
+            atoms.f[3 * src + 2] += atoms.f[3 * gi + 2]

@@ -1,23 +1,22 @@
-from mojo_md.atom import Atoms
+from std.gpu.host import DeviceContext, DeviceBuffer
+from mojo_md.atom import Atoms, GPUAtoms, GPUNeighborList
 from mojo_md.neighbor import NeighborList
 
 
 trait PairStyle(Movable, ImplicitlyDestructible):
+    """Interface for pair (and many-body) potentials.
+
+    Each implementation provides matching CPU and GPU paths that share their
+    kernel body — see pair_lj.mojo / pair_vashishta.mojo. compute() returns
+    total potential energy and accumulates forces into atoms.f. The caller
+    is responsible for zeroing forces before calling.
+
+    For the GPU path the simulation driver owns the device-side parameter
+    buffer (created via make_gpu_params) and passes it to compute_gpu so the
+    pair style itself can be constructed without a DeviceContext.
     """
-    Interface for pair (and many-body) potentials.
 
-    compute() accumulates forces into atoms.f and returns total potential
-    energy. The caller is responsible for zeroing forces before calling.
-
-    Using the full neighbor list, each pair (i,j) is visited twice — once
-    when i is the center atom, once when j is. Implementations must divide
-    the summed energy by the appropriate overcounting factor (2 for 2-body,
-    3 for 3-body triplets).
-
-    The full-list design makes compute() trivially parallelizable over i:
-    each iteration writes only to atoms.f[3*i .. 3*i+2].
-    """
-    fn compute(mut self, mut atoms: Atoms, read nlist: NeighborList) -> Float64:
+    fn compute(mut self, mut atoms: Atoms, mut nlist: NeighborList) -> Float64:
         ...
 
     fn cutoff(self) -> Float64:
@@ -25,4 +24,23 @@ trait PairStyle(Movable, ImplicitlyDestructible):
 
     fn short_cutoff(self) -> Float64:
         """Cutoff for 3-body short neighbor list (0 if not needed)."""
+        ...
+
+    fn needs_reverse_comm(self) -> Bool:
+        """True if compute_gpu writes forces to ghost atoms (Newton's-3rd half list).
+        Full-list and owner-computes pair styles return False."""
+        ...
+
+    fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float32]:
+        """Upload the pair's flat params buffer to device memory as Float32. Caller owns the result."""
+        ...
+
+    fn compute_gpu(
+        self,
+        mut atoms: GPUAtoms,
+        read nlist: GPUNeighborList,
+        read params_dev: DeviceBuffer[DType.float32],
+        ctx: DeviceContext,
+    ) raises -> Float64:
+        """GPU twin of compute(). Float32 kernels for Metal/MPS compatibility."""
         ...

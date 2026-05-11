@@ -43,12 +43,12 @@ fn test_full_list_symmetry() raises:
     for i in range(4):
         var s = nlist.neighbor_start(i)
         for nb in range(s, s + nlist.num_neighbors(i)):
-            var j = nlist.neighbors[nb]
+            var j = Int(nlist.neighbors[nb])
             # verify i appears in j's list
             var found = False
             var sj = nlist.neighbor_start(j)
             for nb2 in range(sj, sj + nlist.num_neighbors(j)):
-                if nlist.neighbors[nb2] == i:
+                if Int(nlist.neighbors[nb2]) == i:
                     found = True
             assert_true(found)
 
