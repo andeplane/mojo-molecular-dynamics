@@ -7,9 +7,7 @@ from mojo_md.atom import Atoms, GPUAtoms, GPUNeighborList
 from mojo_md.neighbor import NeighborList
 from mojo_md.pair_style import PairStyle
 
-# Toggle: full neighbor list (each pair computed twice, no atomics) vs.
-# half neighbor list with Newton's 3rd law (each pair once, atomic_add on f[j]).
-# Flip this and rebuild to compare.
+# Recompile with True to use Newton's-3rd-law half list (requires recompile).
 comptime _USE_HALF_LIST: Bool = False
 
 # Flat layout (per (itype, jtype) pair): 6 floats. Same on CPU and GPU.
@@ -262,6 +260,12 @@ struct PairLJ(PairStyle):
     fn short_cutoff(self) -> Float64:
         return 0.0
 
+    fn needs_reverse_comm(self) -> Bool:
+        comptime if _USE_HALF_LIST:
+            return True
+        else:
+            return False
+
     # ---- CPU dispatch ----
     fn compute(mut self, mut atoms: Atoms, mut nlist: NeighborList) -> Float64:
         var nlocal = atoms.nlocal
@@ -332,7 +336,6 @@ struct PairLJ(PairStyle):
                 grid_dim  = n_blocks,
                 block_dim = _BLOCK_SIZE,
             )
-            return atoms.read_pe_to_cpu(ctx)  # half list: each pair counted once
         else:
             ctx.enqueue_function[_lj_force_kernel, _lj_force_kernel](
                 atoms.x.unsafe_ptr(),
@@ -347,4 +350,4 @@ struct PairLJ(PairStyle):
                 grid_dim  = n_blocks,
                 block_dim = _BLOCK_SIZE,
             )
-            return atoms.read_pe_to_cpu(ctx) * 0.5  # full list double-counts
+        return 0.0  # PE is in atoms.pe_atom on device; read via atoms.read_pe_to_cpu()

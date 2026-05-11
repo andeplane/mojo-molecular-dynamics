@@ -248,7 +248,8 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
         # Initial force evaluation so the first half_step_v has valid forces.
         self._zero_forces_gpu()
         _ = self.pair.compute_gpu(self.atoms, self.nlist, self.pair_params_dev, self.ctx)
-        self._reverse_comm_gpu()
+        if self.pair.needs_reverse_comm():
+            self._reverse_comm_gpu()
 
     fn _zero_forces_gpu(mut self) raises:
         var n = 3 * self.atoms.n()
@@ -307,12 +308,14 @@ struct SimulationGPU[P: PairStyle, I: Integrator](Movable):
                 self._gpu_rebuild(rcut, rcut_short)
 
             self._zero_forces_gpu()
-            var pe = self.pair.compute_gpu(self.atoms, self.nlist, self.pair_params_dev, self.ctx)
-            self._reverse_comm_gpu()
+            _ = self.pair.compute_gpu(self.atoms, self.nlist, self.pair_params_dev, self.ctx)
+            if self.pair.needs_reverse_comm():
+                self._reverse_comm_gpu()
 
             self.integrator.half_step_v_gpu(self.atoms, self.ctx, self.dt)
 
             if self.step % print_interval == 0:
+                var pe = self.atoms.read_pe_to_cpu(self.ctx)
                 var ke = self.atoms.read_ke_to_cpu(self.ctx)
                 print("step", self.step,
                       "PE", pe,

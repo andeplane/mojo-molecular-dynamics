@@ -26,6 +26,11 @@ trait PairStyle(Movable, ImplicitlyDestructible):
         """Cutoff for 3-body short neighbor list (0 if not needed)."""
         ...
 
+    fn needs_reverse_comm(self) -> Bool:
+        """True if compute_gpu writes forces to ghost atoms (Newton's-3rd half list).
+        Full-list and owner-computes pair styles return False."""
+        ...
+
     fn make_gpu_params(self, ctx: DeviceContext) raises -> DeviceBuffer[DType.float32]:
         """Upload the pair's flat params buffer to device memory as Float32. Caller owns the result."""
         ...

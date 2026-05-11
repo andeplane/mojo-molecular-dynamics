@@ -472,7 +472,7 @@ fn _twobody_f32(
     var rinvsq = Float32(1.0) / rsq
     var r4inv  = rinvsq * rinvsq
     var r6inv  = rinvsq * r4inv
-    var reta   = exp(-eta * log(r))   # r^{-eta}, Float32-safe
+    var reta   = exp(-eta * log(r))   # r^{-eta} — pow(Float32, Float32) unavailable on Metal
     var lam1r  = r * lam1inv;  var lam4r = r * lam4inv
     var vc2    = zizj * exp(-lam1r) / r
     var vc3    = mbigd * r4inv * exp(-lam4r)
@@ -790,6 +790,9 @@ struct PairVashishta(PairStyle):
     fn short_cutoff(self) -> Float64:
         return self._r0_max
 
+    fn needs_reverse_comm(self) -> Bool:
+        return False  # owner-computes everywhere; ghost slots never accumulate forces
+
     # ---- CPU dispatch ----
     fn compute(mut self, mut atoms: Atoms, mut nlist: NeighborList) -> Float64:
         var nlocal = atoms.nlocal
@@ -885,4 +888,4 @@ struct PairVashishta(PairStyle):
             block_dim = _BLOCK_SIZE,
         )
 
-        return atoms.read_pe_to_cpu(ctx)
+        return 0.0  # PE is in atoms.pe_atom on device; read via atoms.read_pe_to_cpu()
