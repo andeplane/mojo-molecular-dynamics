@@ -24,7 +24,7 @@ jobs:
         run: |
           uv venv .venv
           source .venv/bin/activate
-          uv pip install mojo
+          uv pip install --pre 'mojo==1.0.0b1'
 
       - name: Run unit and integration tests
         run: |
