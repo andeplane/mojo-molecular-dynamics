@@ -1,10 +1,16 @@
 from std.algorithm import parallelize
+from std.atomic import Atomic
 from std.gpu import global_idx
 from std.gpu.host import DeviceContext, DeviceBuffer
 from std.math import ceildiv
 from mojo_md.atom import Atoms, GPUAtoms, GPUNeighborList
 from mojo_md.neighbor import NeighborList
 from mojo_md.pair_style import PairStyle
+
+# Toggle: full neighbor list (each pair computed twice, no atomics) vs.
+# half neighbor list with Newton's 3rd law (each pair once, atomic_add on f[j]).
+# Flip this and rebuild to compare.
+comptime _USE_HALF_LIST: Bool = False
 
 # Flat layout (per (itype, jtype) pair): 6 floats. Same on CPU and GPU.
 comptime _LJ_STRIDE: Int = 6
@@ -145,6 +151,70 @@ fn _lj_force_kernel(
     pe_ptr[i] = ei
 
 
+# Half-list variant — Newton's 3rd law. For each neighbor j we compute the
+# pair only when i < source(j), where source(j) = j when j is local and
+# source(j) = source_idx[j - nlocal] when j is a ghost. This correctly handles
+# through-boundary pairs (which appear in both atoms' lists as ghosts).
+# Force on i is accumulated in registers and committed atomically at the end;
+# force on j is atomic-subtracted in the inner loop. Energy is NOT halved.
+fn _lj_force_kernel_half(
+    x_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    f_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    pe_ptr:      UnsafePointer[Float32, MutAnyOrigin],
+    type_id_ptr: UnsafePointer[Int32,   MutAnyOrigin],
+    src_ptr:     UnsafePointer[Int32,   MutAnyOrigin],
+    p_ptr:       UnsafePointer[Float32, MutAnyOrigin],
+    off_ptr:     UnsafePointer[Int32,   MutAnyOrigin],
+    nb_ptr:      UnsafePointer[Int32,   MutAnyOrigin],
+    n_types:     Int,
+    nlocal:      Int,
+):
+    var i = Int(global_idx.x)
+    if i >= nlocal:
+        return
+    var xi = x_ptr[3 * i]; var yi = x_ptr[3 * i + 1]; var zi = x_ptr[3 * i + 2]
+    var itype = Int(type_id_ptr[i])
+    var fxi: Float32 = 0.0; var fyi: Float32 = 0.0; var fzi: Float32 = 0.0
+    var ei:  Float32 = 0.0
+    var start = Int(off_ptr[i]); var end = Int(off_ptr[i + 1])
+    for nb in range(start, end):
+        var j = Int(nb_ptr[nb])
+        if j < 0:
+            break
+        # Newton's-3rd-law filter using source(j): for a local j, source = j;
+        # for a ghost j, source = src_ptr[j - nlocal] (the local atom that the
+        # ghost is a copy of). Skip when i >= source(j) — the matched i-thread
+        # of that source atom will compute the pair from its side.
+        var j_src = j if j < nlocal else Int(src_ptr[j - nlocal])
+        if j_src <= i:
+            continue
+        var jtype = Int(type_id_ptr[j])
+        var off = (n_types * itype + jtype) * _LJ_STRIDE
+        var lj1    = p_ptr[off + _LJ_LJ1];  var lj2    = p_ptr[off + _LJ_LJ2]
+        var lj3    = p_ptr[off + _LJ_LJ3];  var lj4    = p_ptr[off + _LJ_LJ4]
+        var rc_sq  = p_ptr[off + _LJ_RC_SQ]; var eshift = p_ptr[off + _LJ_ESHIFT]
+        var dx = xi - x_ptr[3 * j]; var dy = yi - x_ptr[3 * j + 1]; var dz = zi - x_ptr[3 * j + 2]
+        var rsq = dx * dx + dy * dy + dz * dz
+        if rsq < rc_sq:
+            var r2inv = Float32(1.0) / rsq
+            var r6inv = r2inv * r2inv * r2inv
+            var fpair = (lj1 * r6inv - lj2) * r6inv * r2inv
+            var fx_ij = dx * fpair
+            var fy_ij = dy * fpair
+            var fz_ij = dz * fpair
+            fxi += fx_ij; fyi += fy_ij; fzi += fz_ij
+            # Newton's 3rd: f[j] gets the opposite contribution.
+            _ = Atomic.fetch_add(f_ptr + 3 * j,     -fx_ij)
+            _ = Atomic.fetch_add(f_ptr + 3 * j + 1, -fy_ij)
+            _ = Atomic.fetch_add(f_ptr + 3 * j + 2, -fz_ij)
+            ei += r6inv * (lj3 * r6inv - lj4) - eshift
+    # Commit accumulated f[i] atomically (other threads atomic_sub into f[i]).
+    _ = Atomic.fetch_add(f_ptr + 3 * i,     fxi)
+    _ = Atomic.fetch_add(f_ptr + 3 * i + 1, fyi)
+    _ = Atomic.fetch_add(f_ptr + 3 * i + 2, fzi)
+    pe_ptr[i] = ei  # not halved — half list counts each pair once
+
+
 # ---------------------------------------------------------------------------
 # PairLJ — single struct, CPU and GPU dispatchers in the same file.
 # Params stored once (flat List[Float64]). The GPU mirror is owned by the
@@ -247,17 +317,34 @@ struct PairLJ(PairStyle):
     ) raises -> Float64:
         var nlocal = atoms.nlocal
         var n_blocks = ceildiv(nlocal, _BLOCK_SIZE)
-        ctx.enqueue_function[_lj_force_kernel, _lj_force_kernel](
-            atoms.x.unsafe_ptr(),
-            atoms.f.unsafe_ptr(),
-            atoms.pe_atom.unsafe_ptr(),
-            atoms.type_id.unsafe_ptr(),
-            params_dev.unsafe_ptr(),
-            nlist.offsets.unsafe_ptr(),
-            nlist.neighbors.unsafe_ptr(),
-            self.n_types,
-            nlocal,
-            grid_dim  = n_blocks,
-            block_dim = _BLOCK_SIZE,
-        )
-        return atoms.read_pe_to_cpu(ctx) * 0.5  # full list double-counts
+        comptime if _USE_HALF_LIST:
+            ctx.enqueue_function[_lj_force_kernel_half, _lj_force_kernel_half](
+                atoms.x.unsafe_ptr(),
+                atoms.f.unsafe_ptr(),
+                atoms.pe_atom.unsafe_ptr(),
+                atoms.type_id.unsafe_ptr(),
+                atoms.source_idx.unsafe_ptr(),
+                params_dev.unsafe_ptr(),
+                nlist.offsets.unsafe_ptr(),
+                nlist.neighbors.unsafe_ptr(),
+                self.n_types,
+                nlocal,
+                grid_dim  = n_blocks,
+                block_dim = _BLOCK_SIZE,
+            )
+            return atoms.read_pe_to_cpu(ctx)  # half list: each pair counted once
+        else:
+            ctx.enqueue_function[_lj_force_kernel, _lj_force_kernel](
+                atoms.x.unsafe_ptr(),
+                atoms.f.unsafe_ptr(),
+                atoms.pe_atom.unsafe_ptr(),
+                atoms.type_id.unsafe_ptr(),
+                params_dev.unsafe_ptr(),
+                nlist.offsets.unsafe_ptr(),
+                nlist.neighbors.unsafe_ptr(),
+                self.n_types,
+                nlocal,
+                grid_dim  = n_blocks,
+                block_dim = _BLOCK_SIZE,
+            )
+            return atoms.read_pe_to_cpu(ctx) * 0.5  # full list double-counts
